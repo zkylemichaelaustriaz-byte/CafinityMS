@@ -1,0 +1,120 @@
+CAFINITY — MASTER ASSET GENERATION LIST
+=======================================
+Everything you may want to generate, with exact placement paths and specs.
+Status: [DONE] already in repo · [TODO] to generate · [OPTIONAL] nice-to-have,
+code fallback already works without it.
+
+IMPORTANT NAMING RULES
+- Product image filenames = the product's name LOWERCASED with spaces -> hyphens
+  (this is how src/lib/productImages.ts maps them). Add the matching require()
+  line there after dropping the file in.
+- Campaign banner filenames are fixed and mapped in src/lib/campaignImages.ts.
+- All PNG unless noted. Keep file sizes reasonable (<400 KB each ideally).
+
+=====================================================================
+1) CAMPAIGN BANNERS (full-screen seasonal ad + admin preset cards)
+   Path:        assets/images/campaigns/
+   Spec:        9:16 PORTRAIT, 1080x1920 (min 900 wide), PNG, light mode.
+                Title/product text MAY be baked in (app only draws close + CTA).
+                Leave the TOP-RIGHT clear (close button) and the BOTTOM ~30%
+                usable behind a dark scrim (CTA sits there).
+   [DONE] campaign-matcha.png
+   [DONE] campaign-mango.png
+   [DONE] campaign-caramel.png
+   [DONE] campaign-christmas.png
+   [DONE] campaign-valentines.png
+   [DONE] campaign-ube-taro.png
+   [OPTIONAL] campaign-default.png   (generic "Fresh at Cafinity" — currently
+                                      accent fallback; add to campaignImages.ts
+                                      under key "default" if produced)
+   Dark variants: NOT required.
+
+=====================================================================
+2) CAMPAIGN PRESET PREVIEW THUMBNAILS  (admin picker)  [OPTIONAL]
+   Path:        assets/images/campaigns/previews/
+   Spec:        4:3 or 3:2 landscape, 800x500, PNG.
+   Today the admin picker just crops the portrait banner — these are only for a
+   cleaner crop. If you skip them, nothing breaks.
+   preset-matcha.png · preset-mango.png · preset-caramel.png · preset-christmas.png
+   · preset-valentines.png · preset-ube-taro.png · preset-default.png
+
+=====================================================================
+3) EXISTING PRODUCT IMAGES  (already wired)
+   Path:        assets/images/products/   |  Spec: 1:1 square, 1000x1000, PNG
+   [DONE] caramel-macchiato.png  spanish-latte.png  brown-sugar-latte.png
+          americano.png  cappuccino.png  flat-white.png  matcha-latte.png
+          strawberry-milk.png  hot-chocolate.png  butter-croissant.png
+          chocolate-muffin.png  cheesecake-slice.png
+
+=====================================================================
+4) SEASONAL PRODUCT IMAGES  (generate ONLY when the product is seeded)
+   Path:        assets/images/products/   |  Spec: 1:1 square, 1000x1000, PNG,
+                same lighting/style as the 12 existing products.
+   Do NOT add these until the matching product row exists in supabase/seed.sql,
+   then add a require() line in src/lib/productImages.ts. Suggested names tied to
+   each campaign collection (filename = lowercased product name):
+   [TODO] mango:      mango-latte.png · mango-cream-frappe.png
+   [TODO] matcha:     matcha-strawberry-latte.png   (matcha-latte already exists)
+   [TODO] caramel:    caramel-cookie-latte.png      (caramel-macchiato exists)
+   [TODO] christmas:  peppermint-mocha.png · gingerbread-latte.png
+   [TODO] valentines: strawberry-red-velvet-latte.png · choco-strawberry-mocha.png
+   [TODO] ube-taro:   ube-latte.png · taro-milk-tea.png
+   (Final names are yours to decide; just keep filename == lowercased product name.)
+
+=====================================================================
+5) APP IDENTITY  (icons / splash)
+   Path:        assets/images/
+   [DONE] icon.png                         (1024x1024)
+   [DONE] splash-icon.png
+   [DONE] android-icon-foreground.png / -background.png / -monochrome.png
+   [DONE] favicon.png  (web)
+   [TODO] notification-icon.png            96x96, WHITE on TRANSPARENT, simple
+          silhouette (coffee cup). Needed for Android REMOTE push later (dev
+          build only). Place at assets/images/notification-icon.png.
+
+=====================================================================
+6) LOADING / BRANDING  (the "moving" pieces)  [OPTIONAL]
+   Path:        assets/images/branding/  and  assets/animations/
+   Current loader uses the in-app CoffeeCup SVG + a reduced-motion opacity pulse,
+   so all of these are optional upgrades:
+   [OPTIONAL] assets/images/branding/cafinity-loading-mark.png   512x512 transparent
+   [OPTIONAL] assets/images/branding/cafinity-wordmark.png       transparent, ~1200x400
+   [OPTIONAL] assets/animations/coffee-steam-loading.json        Lottie, looping steam
+          (MOVING). If supplied I will wire lottie-react-native in the loader.
+
+=====================================================================
+7) EMPTY-STATE ILLUSTRATIONS  [OPTIONAL — polish]
+   Path:        assets/images/empty/   |  Spec: square, 600x600, PNG transparent,
+                soft line/flat style in the brand palette.
+   Today these screens use an emoji/Ionicon. Optional upgrades:
+   [OPTIONAL] empty-cart.png         (Cart screen)
+   [OPTIONAL] empty-orders.png       (My Orders)
+   [OPTIONAL] empty-notifications.png(Notification center)
+   [OPTIONAL] empty-search.png       (Menu "no drinks found")
+   [OPTIONAL] empty-favorites.png    (Menu Favorites filter)
+   [OPTIONAL] empty-vouchers.png     (Rewards / checkout no vouchers)
+   [OPTIONAL] queue-clear.png        (Staff queue empty)
+
+=====================================================================
+8) ORDER-FLOW ANIMATIONS  [OPTIONAL — moving]
+   Path:        assets/animations/
+   Current order-success uses a reanimated spring check; tracking uses an SVG
+   pulse. Optional Lottie upgrades:
+   [OPTIONAL] order-success.json     (confetti / check, shown on "Order placed")
+   [OPTIONAL] order-brewing.json     (cup filling, shown while "Preparing")
+
+=====================================================================
+9) PROFILE / MISC  [OPTIONAL]
+   [OPTIONAL] assets/images/default-avatar.png   256x256 — fallback avatar
+              (Profile currently shows initials; only needed if you want an image)
+   [OPTIONAL] assets/images/branding/home-hero.png — Home hero art
+              (currently the CoffeeCup SVG; optional replacement)
+
+=====================================================================
+PRIORITY IF YOU WANT A SHORTLIST
+   1. notification-icon.png            (unblocks future Android push)
+   2. coffee-steam-loading.json        (makes the loading screen feel premium)
+   3. seasonal PRODUCT images          (only after seeding the products)
+   4. empty-state illustrations        (cheap, high polish)
+   Everything else is genuinely optional — the app already runs and looks correct
+   with the current code fallbacks.

@@ -1,0 +1,57 @@
+CAFINITY — SEASONAL CAMPAIGN ADVERTISEMENT IMPLEMENTATION
+========================================================
+
+GOAL
+  Bundled local 9:16 portrait images drive a full-screen seasonal advertisement
+  shown after the in-app loading screen, based on the campaign preset an admin
+  selects + activates. No image URL required for the six built-in presets.
+
+KEY FILES
+  src/lib/campaignImages.ts      Static require() map (Metro-bundled), preset_key -> image
+  src/lib/campaignPresets.ts     Preset catalogue (title/subtitle/badge/cta/accent/emoji)
+  src/components/ui/CampaignAd.tsx   The full-screen ad (customer + admin Preview)
+  src/app/(app)/(tabs)/home.tsx  Resolves + shows the ad once per session
+  src/app/admin/campaigns.tsx    Preset-first admin editor + Preview
+  supabase/phase14_campaign_presets.sql   campaigns.preset_key column
+
+PRESET KEYS (canonical)
+  Image-backed: matcha, mango, caramel, christmas, valentines, ube-taro
+  Fallback:     halloween, anniversary, default
+
+IMAGE RESOLUTION ORDER (CampaignAd)
+  1. campaign.hero_image_url (custom, only if non-empty)   -> { uri }
+  2. getCampaignImage(preset_key)                          -> bundled require()
+  3. preset accent background + emoji                      -> fallback
+  Custom URL onError -> drop to bundled, then accent. Never a blank/broken modal.
+
+FREQUENCY / ELIGIBILITY ENFORCEMENT
+  Server RPC get_active_campaign() returns the top-priority active campaign the
+  user is still eligible for (frequency_rule once | once_per_day | always, date
+  window, is_active). Client gate (home.tsx):
+    - module-level campaignShownThisSession flag = "once per session" guard
+      (also survives React dev remounts -> no repeat after tab switches)
+    - only when NOT loading and NO active order (never interrupts tracking)
+    - Home tab only -> never on checkout, staff, or admin
+    - signed-in customer only (NotificationProvider/session gates the app group)
+  On show: recordCampaignView (impression). CTA: recordCampaignAction('click').
+  Dismiss / Not now: recordCampaignAction('dismiss').
+
+ADMIN PREVIEW vs REAL IMPRESSION
+  Admin "Preview" renders the SAME CampaignAd from the in-progress form values.
+  It records NO impression, ignores frequency caps, does not change the active
+  campaign, and works even when the campaign is inactive/unsaved.
+
+CTA ROUTES
+  campaign.product_id set  -> /product/<id>
+  otherwise                -> /menu
+  (Seasonal products are not seeded yet, so the six presets route to /menu unless
+  the admin links a real product. No broken links are created.)
+
+ACCESSIBILITY
+  Close + CTA + image have accessibility labels/roles. Controls sit on translucent
+  black surfaces / a bottom scrim for contrast over varied artwork. Reduced motion:
+  fade transition only.
+
+LIGHT MODE ONLY (for now)
+  The six light images are used in both app themes. No dark campaign variants are
+  requested or required. Theme editor / full seasonal palette remains deferred.

@@ -30,8 +30,12 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files (keep .env.example tracked)
+.env*
+!.env.example
+
+# smoke-test export output
+.smoke-export/
 
 # typescript
 *.tsbuildinfo

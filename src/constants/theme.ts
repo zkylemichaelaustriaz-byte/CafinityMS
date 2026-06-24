@@ -1,65 +1,204 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+// =============================================================================
+// Cafinity Design Tokens — single source of truth for the visual system.
+//
+// Light theme is the active, shipped theme. A complete PROVISIONAL dark palette
+// is defined for future use; no dark-mode toggle ships in this phase.
+// NativeWind/Tailwind class equivalents live in tailwind.config.js and must be
+// kept in sync with `lightTheme` below.
+// =============================================================================
 
-import '@/global.css';
+import { seasonalColors } from "@/theme/seasonal";
 
-import { Platform } from 'react-native';
+export interface ThemeColors {
+  background: string;
+  surface: string;
+  surfaceMuted: string;
+  surfaceElevated: string;
+  textPrimary: string;
+  textSecondary: string;
+  textMuted: string;
+  brandPrimary: string;
+  brandSecondary: string;
+  secondary: string;
+  secondarySoft: string;
+  accent: string;
+  accentSoft: string;
+  border: string;
+  success: string;
+  warning: string;
+  danger: string;
+  info: string;
+  disabled: string;
+  overlay: string;
+  skeleton: string;
+  onBrand: string;
+  onAccent: string;
+}
 
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+export const lightTheme: ThemeColors = {
+  background: "#FBF7F1", // warm ivory
+  surface: "#FFFFFF",
+  surfaceMuted: "#F2EADF",
+  surfaceElevated: "#FFFFFF",
+  textPrimary: "#231711", // espresso ink
+  textSecondary: "#6B5A4E",
+  textMuted: "#8A7A6B", // darkened for AA contrast on ivory
+  brandPrimary: "#5A3019", // deep espresso — primary CTA / dark panels
+  brandSecondary: "#9A6A43", // latte / mocha
+  secondary: "#5E7A5A", // sage green — fresh secondary
+  secondarySoft: "#E6EDE3",
+  accent: "#E0832B", // amber — energy, progress, highlights
+  accentSoft: "#F8E4C8",
+  border: "#EADED0",
+  success: "#2F855A",
+  warning: "#D97E27",
+  danger: "#C0392B",
+  info: "#2B6CB0",
+  disabled: "#D6C9BA",
+  overlay: "rgba(30,18,12,0.55)",
+  skeleton: "#ECE2D5",
+  onBrand: "#FFFFFF",
+  onAccent: "#3A2410",
+};
+
+export const darkTheme: ThemeColors = {
+  background: "#160F08",
+  surface: "#201710",
+  surfaceMuted: "#2A1F14",
+  surfaceElevated: "#2E2216",
+  textPrimary: "#F6EEE2",
+  textSecondary: "#C9B7A4",
+  textMuted: "#8C7A68",
+  brandPrimary: "#C98B5C",
+  brandSecondary: "#A86B43",
+  secondary: "#7FA078",
+  secondarySoft: "#27341F",
+  accent: "#E8A24A",
+  accentSoft: "#3A2A18",
+  border: "#3A2C1D",
+  success: "#48BB78",
+  warning: "#E0922F",
+  danger: "#E05A4B",
+  info: "#5A9BD4",
+  disabled: "#4A3B2C",
+  overlay: "rgba(0,0,0,0.6)",
+  skeleton: "#2E2216",
+  onBrand: "#1A120A",
+  onAccent: "#1A120A",
+};
+
+// --- Runtime scheme + seasonal palette switching -----------------------------
+let _scheme: "light" | "dark" = "light";
+let _seasonalKey: string | null = null;
+
+/** Called by the root layout whenever the effective color scheme changes. */
+export function applyScheme(s: "light" | "dark") {
+  _scheme = s;
+}
+
+/** Called by the root layout whenever the active seasonal campaign changes. */
+export function applySeasonal(key: string | null) {
+  _seasonalKey = key;
+}
+
+export function activeScheme(): "light" | "dark" {
+  return _scheme;
+}
+
+function activeTheme(): ThemeColors {
+  const base = _scheme === "dark" ? darkTheme : lightTheme;
+  // seasonal.ts only type-imports from this module, so there is no runtime cycle.
+  const override = seasonalColors(_seasonalKey);
+  return override ? { ...base, ...override } : base;
+}
+
+/** Active palette — proxied so JS color reads follow the current scheme. */
+export const theme = new Proxy({} as ThemeColors, {
+  get: (_t, key: string | symbol) => activeTheme()[key as keyof ThemeColors],
+}) as ThemeColors;
+
+export interface ColorsShape {
+  brand: string;
+  brandDark: string;
+  brandLight: string;
+  espresso: string;
+  cream: string;
+  caramel: string;
+  accent: string;
+  secondary: string;
+  matcha: string;
+  text: string;
+  textMuted: string;
+  border: string;
+  surface: string;
+  danger: string;
+  success: string;
+  warning: string;
+  info: string;
+}
+
+function colorsFrom(t: ThemeColors): ColorsShape {
+  return {
+    brand: t.brandPrimary,
+    brandDark: _scheme === "dark" ? "#7E5234" : "#3F210F",
+    brandLight: "#C9A47C",
+    espresso: t.textPrimary,
+    cream: t.background,
+    caramel: t.accent,
+    accent: t.accent,
+    secondary: t.secondary,
+    matcha: t.secondary,
+    text: t.textPrimary,
+    textMuted: t.textMuted,
+    border: t.border,
+    surface: t.surface,
+    danger: t.danger,
+    success: t.success,
+    warning: t.warning,
+    info: t.info,
+  };
+}
+
+/** Back-compat JS color map — proxied to follow the active scheme. */
+export const Colors = new Proxy({} as ColorsShape, {
+  get: (_t, key: string | symbol) => colorsFrom(activeTheme())[key as keyof ColorsShape],
+}) as ColorsShape;
+
+export type AppColor = keyof ColorsShape;
+
+// --- Shape / spacing / type / motion tokens ----------------------------------
+export const radii = { xs: 8, sm: 12, md: 16, lg: 22, xl: 28, pill: 999 } as const;
+
+export const spacing = { gutter: 20, section: 28, gap: 12, cardPad: 16 } as const;
+
+export const fonts = {
+  body: "System",
+  serif: "Fraunces_400Regular",
+  heading: "Fraunces_600SemiBold",
+  display: "Fraunces_700Bold",
+  displayBlack: "Fraunces_900Black",
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
-
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
-
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
+export const motion = {
+  fast: 150,
+  base: 240,
+  slow: 360,
+  spring: { damping: 16, stiffness: 180, mass: 0.7 },
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+export const shadow = {
+  card: {
+    shadowColor: "#3A2410",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  floating: {
+    shadowColor: "#3A2410",
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+} as const;

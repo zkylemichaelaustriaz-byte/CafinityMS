@@ -1,0 +1,49 @@
+CAFINITY — SEASONAL & LOADING ASSET INVENTORY
+=============================================
+(Plain text per project rule: no new docs/*.md files. Use .txt or .pdf.)
+
+CAMPAIGN BANNERS  ->  assets/images/campaigns/
+Path:          assets/images/campaigns/
+Format:        PNG
+Orientation:   Portrait
+Aspect ratio:  9:16
+Mode:          Light
+Usage:         Post-loading full-screen seasonal advertisement (CampaignAd)
+               + admin campaign preset preview thumbnails
+
+SUPPLIED (bundled, mapped by preset_key in src/lib/campaignImages.ts):
+  [SUPPLIED] campaign-matcha.png       (preset: matcha)
+  [SUPPLIED] campaign-mango.png        (preset: mango)
+  [SUPPLIED] campaign-caramel.png      (preset: caramel)
+  [SUPPLIED] campaign-christmas.png    (preset: christmas)
+  [SUPPLIED] campaign-valentines.png   (preset: valentines)
+  [SUPPLIED] campaign-ube-taro.png     (preset: ube-taro)
+
+Image resolution order at render time (CampaignAd / CampaignImage):
+  1. Admin custom hero_image_url (only when explicitly provided)
+  2. Bundled local image mapped by preset_key (the six above)
+  3. Existing preset accent + emoji fallback
+  If a custom URL fails to load it falls back to the bundled image, then accent.
+
+DARK CAMPAIGN ASSETS:
+  Not currently required. The light artwork is shown in both app themes (it is a
+  promotional asset independent of the base UI theme).
+
+PRESETS STILL ON CODE FALLBACK (accent + emoji, no bundled art yet):
+  default      -> assets/images/campaigns/campaign-default.png      (OPTIONAL)
+  (Halloween and Anniversary presets were REMOVED on request.)
+  Recommended if/when produced: 9:16 portrait PNG, same family as the six above.
+
+SEASONAL PRODUCT IMAGES  ->  assets/images/products/   (OPTIONAL)
+  Only add once the matching product exists in supabase/seed.sql. Keys are the
+  lowercased product name (see src/lib/productImages.ts). The six campaigns do
+  NOT depend on any new product images; CTAs route to Menu when no linked
+  product is set.
+
+LOADING / BRANDING  (OPTIONAL — code fallback active)
+  assets/images/branding/cafinity-loading-mark.png   (NOT supplied — uses in-app
+                                                       CoffeeCup SVG + wordmark)
+  assets/animations/coffee-steam-loading.json        (NOT supplied — uses a
+                                                       reduced-motion opacity pulse)
+  Native splash (assets/images/splash-icon.png) is configured in app.json; its
+  true look must be verified in a development/preview build, not Expo Go.

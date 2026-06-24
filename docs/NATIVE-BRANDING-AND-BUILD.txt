@@ -1,0 +1,37 @@
+CAFINITY — NATIVE BRANDING + EAS PREVIEW BUILD
+==============================================
+The blue Expo logo on launch is an EXPO GO limitation. Expo Go always shows its
+own splash/icon — it is NOT proof of Cafinity's real native branding. The native
+icon/splash can only be verified in an EAS preview/production build.
+
+WHAT WAS FIXED
+  - app.json ios.icon previously pointed at "./assets/expo.icon" (a stray empty
+    directory). Removed it so iOS uses the real top-level Cafinity icon
+    (assets/images/icon.png, 1024px).
+  - Android adaptive icon (foreground/background/monochrome) + splash already use
+    Cafinity art with background #9c6b44. App name = "Cafinity".
+  - eas.json created with development / preview / production profiles. The preview
+    profile builds an internal-distribution APK (channel "preview").
+
+BUILD A PREVIEW (to verify the real icon + splash)
+  1. npm i -g eas-cli           (once)
+  2. eas login
+  3. eas build:configure        (first time only; links/creates the EAS project)
+  4. Android APK:
+       eas build --profile preview --platform android
+  5. iOS (needs an Apple account; simulator build is fine for visuals):
+       eas build --profile preview --platform ios
+  6. Install the resulting build on a physical device and open it.
+
+VERIFY ON THE INSTALLED PREVIEW BUILD (NOT Expo Go)
+  - Launcher icon is the Cafinity icon (no Expo/React template icon).
+  - Splash shows Cafinity art on the #9c6b44 background.
+  - Splash -> in-app loading mark/wordmark -> Auth/Home transitions with no white
+    or Expo-blue flash and no logo-scale jump.
+  - Android notification icon (assets/images/notification-icon.png) appears for
+    push in a dev/preview build (Expo Go cannot register Android push tokens).
+
+NOTES
+  - Do NOT commit private signing credentials; EAS manages them.
+  - Native icon/splash are NOT considered verified until a preview/production
+    build has been installed and opened on a real device.

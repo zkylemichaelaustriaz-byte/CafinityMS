@@ -1,0 +1,52 @@
+CAFINITY — OPTIONAL VISUAL-POLISH ASSET REQUESTS
+================================================
+All items below are OPTIONAL. The app already renders correctly with code
+fallbacks (SVG / gradients / existing branding). Request only if it materially
+improves the design. Plain text per project rule (no new .md files).
+
+--------------------------------------------------------------------
+1) auth-hero.png   [Priority: MEDIUM]   (welcome/auth redesign — not built yet)
+   Folder:        assets/images/branding/
+   Purpose:       Upper brand/visual zone of the redesigned welcome screen.
+   Dimensions:    1440 × 1000 or larger
+   Aspect ratio:  landscape-to-square adaptable crop
+   Composition:   warm premium café photography; Cafinity drink/cup on the right;
+                  clear negative space (left/top) for wordmark + value prop.
+   Empty space:   keep the left third clear for live brand text.
+   Text baked in: NO (no buttons, no form text).
+   Code fallback: reuse assets/images/branding/home-hero.png + scrim.
+
+2) rewards-hero.png   [Priority: LOW]   (Rewards hero card — SVG version shipped)
+   Folder:        assets/images/branding/
+   Purpose:       Decorative layer behind the live points/progress on the Rewards
+                  hero (Home + Rewards screen).
+   Dimensions:    1600 × 900
+   Aspect ratio:  16:9
+   Composition:   Cafinity cup / beans / reward stars / voucher motif on the RIGHT;
+                  dark or transparent background; evergreen (not seasonal).
+   Empty space:   keep the LEFT half clear for live points + progress bar.
+   Text baked in: NO numbers, names, or buttons.
+   Code fallback: ALREADY SHIPPED — components/ui/RewardsHero.tsx uses the in-app
+                  CoffeeCup SVG over the espresso card. This asset is only a polish
+                  upgrade.
+
+3) profile-cover.png   [Priority: LOW]   (Profile hero — redesign not built yet)
+   Folder:        assets/images/branding/
+   Purpose:       Subtle texture behind the profile header (avatar/name/stats).
+   Dimensions:    1600 × 700
+   Aspect ratio:  ~16:7
+   Composition:   warm abstract coffee texture / café lighting; NO person, NO text;
+                  subtle enough to sit behind user information.
+   Empty space:   whole image must stay low-contrast so overlaid text is readable.
+   Text baked in: NO.
+   Code fallback: code-generated gradient / SVG behind the header.
+
+--------------------------------------------------------------------
+NOT REQUESTING (already covered by code / existing assets):
+  - Loading mark + wordmark .......... supplied & wired
+  - Home hero ........................ supplied & wired
+  - Default avatar ................... supplied & wired
+  - Empty-state illustrations (7) .... supplied & wired
+  - Campaign banners + previews ...... supplied & wired
+  - Seasonal product images (10) ..... supplied & wired
+  - Native app icon / adaptive icon / splash-icon ... present (Cafinity)

@@ -1,0 +1,76 @@
+/** @type {import('tailwindcss').Config} */
+const c = (name) => `rgb(var(--color-${name}) / <alpha-value>)`;
+
+module.exports = {
+  content: ["./src/**/*.{js,jsx,ts,tsx}"],
+  // Class-based dark mode so the in-app toggle (colorScheme.set) controls it,
+  // not just the OS media query.
+  darkMode: "class",
+  presets: [require("nativewind/preset")],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          50: c("brand-50"),
+          100: c("brand-100"),
+          200: c("brand-200"),
+          300: c("brand-300"),
+          400: c("brand-400"),
+          500: c("brand-500"),
+          600: c("brand-600"),
+          700: c("brand-700"),
+          800: c("brand-800"),
+          900: c("brand-900"),
+          950: c("brand-950"),
+        },
+        accent: {
+          DEFAULT: c("accent"),
+          100: c("accent-100"),
+          200: c("accent-200"),
+          300: c("accent-300"),
+          400: c("accent-400"),
+          500: c("accent-500"),
+          600: c("accent-600"),
+          700: c("accent-700"),
+        },
+        secondary: {
+          DEFAULT: c("secondary"),
+          soft: c("secondary-soft"),
+          500: c("secondary-500"),
+          600: c("secondary-600"),
+        },
+        background: c("background"),
+        surface: c("surface"),
+        surfaceMuted: c("surfaceMuted"),
+        surfaceElevated: c("surfaceElevated"),
+        textPrimary: c("textPrimary"),
+        textSecondary: c("textSecondary"),
+        textMuted: c("textMuted"),
+        brandPrimary: c("brandPrimary"),
+        brandSecondary: c("brandSecondary"),
+        line: c("line"),
+        success: c("success"),
+        warning: c("warning"),
+        danger: c("danger"),
+        info: c("info"),
+        skeleton: c("skeleton"),
+        cream: c("cream"),
+        espresso: c("espresso"),
+        caramel: c("caramel"),
+        matcha: c("matcha"),
+      },
+      fontFamily: {
+        sans: ["System"],
+        serif: ["Fraunces_400Regular"],
+        heading: ["Fraunces_600SemiBold"],
+        display: ["Fraunces_700Bold"],
+        black: ["Fraunces_900Black"],
+      },
+      borderRadius: {
+        card: "16px",
+        panel: "26px",
+      },
+    },
+  },
+  plugins: [],
+};
