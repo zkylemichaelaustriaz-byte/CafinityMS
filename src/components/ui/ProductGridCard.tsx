@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -12,8 +13,12 @@ import { getProductBadge } from "@/lib/productBadge";
 import { localProductImage } from "@/lib/productImages";
 import type { MenuProduct } from "@/types/models";
 
-/** Vertical product card for the 2-column menu grid. */
-export function ProductGridCard({ product }: { product: MenuProduct }) {
+/** Vertical product card for the 2-column menu grid. Memoized for list perf. */
+export const ProductGridCard = memo(function ProductGridCard({
+  product,
+}: {
+  product: MenuProduct;
+}) {
   const router = useRouter();
   const inStock = product.inStock;
   const badge = getProductBadge(product);
@@ -72,4 +77,4 @@ export function ProductGridCard({ product }: { product: MenuProduct }) {
       </View>
     </AnimatedPressable>
   );
-}
+});

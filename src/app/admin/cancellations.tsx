@@ -210,20 +210,20 @@ function RefundChip({ status, amount }: { status: string; amount: number }) {
   if (status === "refunded") {
     return (
       <View className="rounded-full bg-green-100 px-2 py-0.5">
-        <Text className="text-[10px] font-semibold text-green-700">Refunded {peso(amount)}</Text>
+        <Text className="text-[10px] font-semibold text-success">Refunded {peso(amount)}</Text>
       </View>
     );
   }
   if (status === "refund_pending") {
     return (
       <View className="rounded-full bg-amber-100 px-2 py-0.5">
-        <Text className="text-[10px] font-semibold text-amber-800">Return {peso(amount)}</Text>
+        <Text className="text-[10px] font-semibold text-warning">Return {peso(amount)}</Text>
       </View>
     );
   }
   return (
-    <View className="rounded-full bg-stone-200 px-2 py-0.5">
-      <Text className="text-[10px] font-semibold text-stone-600">No charge</Text>
+    <View className="rounded-full bg-surfaceMuted px-2 py-0.5">
+      <Text className="text-[10px] font-semibold text-textSecondary">No charge</Text>
     </View>
   );
 }

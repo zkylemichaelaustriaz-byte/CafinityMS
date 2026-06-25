@@ -3,6 +3,13 @@ import { humanizeError } from "@/lib/errors";
 /** Maps server-enforced order business rules to clear, actionable messages. */
 export function mapOrderError(e: unknown): { title: string; message: string } {
   const msg = (e as { message?: string })?.message ?? "";
+  if (/SEASONAL_UNAVAILABLE/i.test(msg)) {
+    return {
+      title: "Seasonal item unavailable",
+      message:
+        "A seasonal item in your order is no longer available under the current campaign. Remove it to continue.",
+    };
+  }
   if (/confirm cash payment before preparing/i.test(msg)) {
     return {
       title: "Payment must be confirmed first",

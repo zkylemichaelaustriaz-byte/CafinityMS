@@ -1,0 +1,65 @@
+CAFINITY — ADMIN ANALYTICS DEFINITIONS  (Batch 13)
+==================================================
+Dashboard: src/app/admin/(tabs)/index.tsx   Chart: src/components/admin/RevenueChart.tsx
+
+PERIOD SELECTOR (one selection drives EVERY tile + chart)
+  Today      = since local midnight today.
+  This week  = since Monday of the current week (local).
+  This month = since the 1st of the current month (local).
+  Every KPI, both charts, top sellers, ratings, and cancellation summary use this
+  same period. Charts are explicitly labelled with the period (e.g. "Revenue ·
+  this week, by day") so nothing is an unlabelled mismatch.
+
+KPI HERO + ROW (selected period)
+  Revenue       = sum(total_amount) of orders with payment_status='paid' AND
+                  status<>'cancelled', created in the period.
+  vs <previous> = (revenue − prevRevenue) / prevRevenue, where prevRevenue is the
+                  same-length window immediately before (yesterday / last week /
+                  last month). null when prevRevenue=0 ("No sales <prev>").
+  Orders        = count of paid, non-cancelled orders in the period.
+  Avg order     = Revenue / Orders (0 when no orders).
+  Ratings       = average + count of feedback created in the period.
+
+REVENUE TREND CHART (period-bucketed)
+  Today      → 3-hour blocks 6a/9a/12p/3p/6p/9p (current block highlighted).
+  This week  → Mo..Su (today highlighted).
+  This month → W1..W5 weeks of the month (current week highlighted).
+  Bar value = paid, non-cancelled revenue in that bucket. Highlight bar uses the
+  campaign accent (Colors.caramel → themed). Empty period shows a flat baseline +
+  "No revenue in this period yet."
+
+DEMAND PATTERN CHART (orders by time, same buckets)
+  Bar value = COUNT of all orders placed in the bucket (all statuses = true
+  demand/volume). Same labels/highlight as the revenue trend. Helps spot peak
+  service times. Empty → "No orders in this period yet."
+
+TOP SELLERS (period)  = product_name → sum(quantity) over paid non-cancelled
+  orders, top 5 by quantity.
+
+CANCELLATION SUMMARY (period; lib/cancellationStats.ts)
+  Cancelled count, rate = cancelled / orders-in-period, refunded total, pending
+  cash refunds, top reasons, customer/staff and before/after-payment splits.
+  Tapping opens /admin/cancellations for the full breakdown.
+
+DATA SOURCE & RULES
+  - getOrdersSince(prevStartOf('month')) + getFeedbackList + getCancellationsSince
+    are fetched once; all period math is computed client-side from that window
+    (reaches back to the start of last month so the comparison + monthly charts
+    have data). Respects RLS (admin reads via the existing queries).
+  - "Revenue" always excludes cancelled + unpaid orders. Refunds are surfaced in
+    the cancellation summary (not subtracted from gross revenue here).
+  - Charts are SVG (react-native-svg) — no chart dependency added. Theme-reactive
+    (highlight = campaign accent), dark-mode safe (semantic tokens).
+
+TIMEZONE NOTE
+  Period boundaries + chart buckets use the DEVICE local time. (The pickup-number
+  business_date uses Asia/Manila server-side — see ORDER-NUMBER-AND-ETA-RULES.txt.)
+  For a single-timezone café this is consistent; multi-tz deployments should move
+  aggregation into a timezone-aware SQL/RPC.
+
+LIMITATIONS / FUTURE
+  - Aggregation is client-side over the fetched window. For large order volumes,
+    move to a SQL/RPC aggregation (period + branch + status + refund + tz aware).
+  - No branch filter on this screen yet (single-branch assumption); add a branch
+    selector + branch_id filter when multi-branch reporting is needed.
+  - CSV export not yet implemented (planned).

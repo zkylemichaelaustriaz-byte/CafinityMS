@@ -1,0 +1,55 @@
+CAFINITY — ORDER NUMBER & ETA RULES  (Batch 10)
+===============================================
+TWO IDENTIFIERS
+  1. Canonical reference (UNCHANGED): orders.order_number = "CF-YYMMDD-####".
+     Used for DB uniqueness, receipts, support, auditing, admin/staff detail.
+     Never removed or rewritten; legacy orders keep theirs.
+  2. Friendly pickup number (NEW): orders.display_queue_number, shown as "#042".
+     Customer-facing. Resets daily PER BRANCH.
+
+PICKUP NUMBER GENERATION  (migration: supabase/phase20_pickup_number.sql — run AFTER phase19)
+  - Columns: orders.display_queue_number int, orders.business_date date.
+  - Table branch_daily_order_counters(branch_id, business_date, last_number) — RLS on,
+    no policies; written only by the trigger.
+  - BEFORE INSERT trigger assign_pickup_number() (SECURITY DEFINER):
+      business_date = (now() at time zone 'Asia/Manila')::date
+      INSERT ... ON CONFLICT (branch_id, business_date) DO UPDATE
+        SET last_number = last_number + 1  RETURNING last_number
+    The ON CONFLICT locks the single counter row → concurrency-safe, never
+    duplicates within a branch + business date. Server-side only (not the client).
+  - Legacy orders: display_queue_number stays NULL → UI falls back to order_number
+    via lib/format pickupOrRef().
+  - Run order: … → phase19_profile_avatars → phase20_pickup_number.
+
+QUEUE POSITION  (RPC orders_ahead(order_id), SECURITY DEFINER)
+  Counts active orders (pending/preparing) in the same branch created earlier.
+  Returns only an integer (no other-customer data). 0 when the order is not active.
+
+CUSTOMER DISPLAY HIERARCHY
+  Active-order card / tracking header:
+      Pickup #042            (large)
+      <status>               (e.g. Preparing)
+      N orders ahead         (from orders_ahead; "You're next" at 0; queue fallback copy)
+      Estimated 7–12 min     (ETA range; never a fake second countdown)
+  Canonical ref appears only in details: "Ref CF-260625-0001 · Placed …".
+
+LIVE PROGRESS  (components/ui/OrderProgress.tsx)
+  5 steps: Order placed → Payment confirmed → Preparing → Ready for pickup → Completed.
+  Payment confirmed = payment_status='paid' (Cash shows "Pay at the counter" until
+  confirmed). Completed steps checked; current step accented + "In progress"; future
+  muted. Updated via existing Realtime (subscribeOrder). Cancellation/refund shown
+  separately (existing banners), not as a step.
+
+ETA RULES
+  - Range only ("Estimated 7–12 min"), from the existing compute_eta snapshot
+    (estimated_min/max_minutes). Hidden once Ready.
+  - No per-second countdown. When unavailable: "Your order is in the queue. We'll
+    update the estimate shortly." "Updated <time>" from eta_calculated_at/updated_at.
+
+STAFF
+  Queue card + Order detail show the same Pickup #042 plus the canonical
+  order_number (small). Staff search still matches the canonical reference.
+
+NOT DEVICE-TESTED HERE
+  Concurrent creation / daily reset / branch uniqueness, realtime step changes,
+  queue count accuracy — verify after running phase20.

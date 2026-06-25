@@ -18,6 +18,7 @@ export interface Profile {
   first_name: string;
   last_name: string;
   email: string;
+  avatar_url: string | null;
   loyalty_points: number;
   current_streak: number;
   last_order_date: string | null;
@@ -130,6 +131,12 @@ export interface MenuProduct extends Product {
   lowStock: boolean;
   /** Seasonal collection this product belongs to (matches a campaign preset_key). */
   collection_key?: string | null;
+  /** True for limited-time products gated by the active seasonal campaign. */
+  is_seasonal: boolean;
+  /** False when a seasonal product is hidden because its campaign isn't active. */
+  orderable: boolean;
+  /** Remote per-presentation images (admin-uploaded). Default falls back to image_url. */
+  media?: { default?: string; hot?: string; iced?: string };
 }
 
 export interface Promotion {
@@ -217,6 +224,7 @@ export interface OrderItem {
   unit_price: number;
   subtotal: number;
   item_notes: string;
+  presentation_key?: "default" | "hot" | "iced" | null;
   order_item_customization: OrderItemCustomization[];
 }
 
@@ -225,6 +233,9 @@ export interface Order {
   user_id: string;
   branch_id: string;
   order_number: string | null;
+  /** Short per-branch, per-day pickup number (e.g. 42 → "#042"). Null for legacy. */
+  display_queue_number?: number | null;
+  business_date?: string | null;
   status: OrderStatus;
   subtotal: number;
   discount_amount: number;
@@ -345,6 +356,12 @@ export interface CartLine {
   quantity: number;
   selectedOptions: CartSelectedOption[];
   notes: string;
+  /** Seasonal collection of the product (for active-campaign cart validation). */
+  collectionKey?: string | null;
+  /** True if the product is a limited-time seasonal item. */
+  isSeasonal?: boolean;
+  /** Presentation snapshot (default/hot/iced) from the chosen Temperature. */
+  presentationKey?: "default" | "hot" | "iced";
 }
 
 /** Result returned by the place_order RPC. */

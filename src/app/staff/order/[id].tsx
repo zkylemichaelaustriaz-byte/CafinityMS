@@ -26,12 +26,13 @@ import {
   confirmCashPayment,
   getAppSettings,
   getOrder,
+  getOrderCustomer,
   setOrderEta,
   subscribeOrder,
   verifyStatutoryDiscount,
 } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
-import { formatDateTime, formatEta, peso, statusLabel } from "@/lib/format";
+import { formatDateTime, formatEta, peso, pickupOrRef, statusLabel } from "@/lib/format";
 import { mapOrderError } from "@/lib/orderErrors";
 import type { Order, OrderStatus } from "@/types/models";
 
@@ -45,8 +46,10 @@ function nextAction(status: OrderStatus): { label: string } | null {
 export default function StaffOrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [order, setOrder] = useState<Order | null>(null);
+  const [customer, setCustomer] = useState<{ first_name: string; last_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [reasonRequired, setReasonRequired] = useState(false);
@@ -56,6 +59,9 @@ export default function StaffOrderScreen() {
     if (!id) return;
     try {
       setOrder(await getOrder(id));
+      getOrderCustomer(id)
+        .then(setCustomer)
+        .catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -74,6 +80,14 @@ export default function StaffOrderScreen() {
       setOrder((prev) => (prev ? { ...prev, ...row } : prev)),
     );
   }, [id]);
+
+  // Live elapsed-time ticker while the order is still active.
+  const ticking = order && order.status !== "completed" && order.status !== "cancelled";
+  useEffect(() => {
+    if (!ticking) return;
+    const t = setInterval(() => setNow(Date.now()), 20000);
+    return () => clearInterval(t);
+  }, [ticking]);
 
   async function doAdvance() {
     if (!order) return;
@@ -186,12 +200,20 @@ export default function StaffOrderScreen() {
   const action = nextAction(order.status);
   const done = order.status === "completed" || order.status === "cancelled";
   const cashUnpaid = order.payment_method === "Cash" && order.payment_status !== "paid";
+  const elapsedMin = Math.max(0, Math.floor((now - new Date(order.created_at).getTime()) / 60000));
+  const elapsedColor =
+    elapsedMin >= 10 ? "text-danger" : elapsedMin >= 5 ? "text-warning" : "text-textSecondary";
+  const elapsedIconColor =
+    elapsedMin >= 10 ? Colors.danger : elapsedMin >= 5 ? Colors.warning : Colors.textMuted;
+  const customerName = customer
+    ? `${customer.first_name} ${customer.last_name}`.trim()
+    : order.discount_holder_name || null;
   const needsVerify =
     !!order.statutory_discount_type && order.discount_verification === "pending_verification";
 
   return (
     <Screen edges={["top"]}>
-      <Header title={order.order_number ?? "Order"} />
+      <Header title={`Pickup ${pickupOrRef(order)}`} />
       <ScrollView
         ref={scrollRef}
         contentContainerClassName="p-5 pb-40"
@@ -202,7 +224,8 @@ export default function StaffOrderScreen() {
       >
         <View className="flex-row items-center justify-between">
           <Text className="text-xs text-textMuted">
-            Placed {formatDateTime(order.created_at)}
+            {order.order_number ? `Ref ${order.order_number} · ` : ""}Placed{" "}
+            {formatDateTime(order.created_at)}
           </Text>
           <Badge
             label={statusLabel(order.status)}
@@ -225,19 +248,35 @@ export default function StaffOrderScreen() {
           </Text>
         </View>
 
+        {/* Ticket header: customer + live elapsed time */}
+        <View className="mt-3 flex-row items-center justify-between rounded-card border border-line bg-surface p-3">
+          <View className="flex-1 flex-row items-center gap-2 pr-2">
+            <Ionicons name="person-circle-outline" size={22} color={Colors.brand} />
+            <Text className="flex-1 text-base font-bold text-textPrimary" numberOfLines={1}>
+              {customerName ?? "Guest"}
+            </Text>
+          </View>
+          {!done ? (
+            <View className="flex-row items-center gap-1">
+              <Ionicons name="time-outline" size={14} color={elapsedIconColor} />
+              <Text className={`text-sm font-bold ${elapsedColor}`}>{elapsedMin}m elapsed</Text>
+            </View>
+          ) : null}
+        </View>
+
         {/* Prominent payment state */}
         {cashUnpaid ? (
-          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-warning bg-warningSoft p-3">
             <Ionicons name="cash-outline" size={18} color="#b45309" />
             <View className="flex-1">
-              <Text className="text-sm font-bold text-amber-800">Payment pending</Text>
-              <Text className="text-xs text-amber-700">
+              <Text className="text-sm font-bold text-warning">Payment pending</Text>
+              <Text className="text-xs text-warning">
                 Cash at pickup — confirm payment before you can start preparing.
               </Text>
             </View>
           </View>
         ) : (
-          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-3">
+          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-green-200 bg-successSoft p-3">
             <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
             <Text className="text-sm font-semibold text-success">
               Paid · {order.payment_method}
@@ -316,10 +355,16 @@ export default function StaffOrderScreen() {
           </View>
         ) : null}
 
+        {/* Special instructions — highlighted so a barista never misses it */}
         {order.notes ? (
-          <View className="mt-3 rounded-xl bg-accent-100 p-3">
-            <Text className="text-xs font-semibold text-brand-800">Customer note</Text>
-            <Text className="text-sm text-brand-900">“{order.notes}”</Text>
+          <View className="mt-3 rounded-xl border-2 border-warning bg-warningSoft p-3">
+            <View className="flex-row items-center gap-1.5">
+              <Ionicons name="alert-circle" size={16} color={Colors.warning} />
+              <Text className="text-xs font-bold uppercase tracking-wide text-warning">
+                Special instructions
+              </Text>
+            </View>
+            <Text className="mt-1 text-base font-medium text-textPrimary">{order.notes}</Text>
           </View>
         ) : null}
 
@@ -328,7 +373,13 @@ export default function StaffOrderScreen() {
           Items to prepare
         </Text>
         <View className="rounded-card border border-line bg-surface p-4">
-          {(order.order_items ?? []).map((it) => (
+          {(order.order_items ?? []).map((it) => {
+            const temp =
+              it.presentation_key ??
+              it.order_item_customization
+                .find((c) => ["hot", "iced"].includes(c.option_name.toLowerCase()))
+                ?.option_name.toLowerCase();
+            return (
             <View key={it.id} className="mb-3 flex-row border-b border-line pb-3">
               <ProductImage
                 source={localProductImage(it.product_name)}
@@ -346,7 +397,14 @@ export default function StaffOrderScreen() {
                     {peso(it.subtotal)}
                   </Text>
                 </View>
-                <Text className="text-sm text-brandPrimary">{it.variant_name}</Text>
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-sm font-semibold text-brandPrimary">{it.variant_name}</Text>
+                  {temp ? (
+                    <View className="rounded-full bg-accent-100 px-2 py-0.5">
+                      <Text className="text-[10px] font-bold uppercase text-brandPrimary">{temp}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 {it.order_item_customization.length > 0 ? (
                   <View className="mt-1">
                     {it.order_item_customization.map((c) => (
@@ -363,7 +421,8 @@ export default function StaffOrderScreen() {
                 ) : null}
               </View>
             </View>
-          ))}
+            );
+          })}
           <View className="flex-row items-center justify-between pt-1">
             <Text className="font-heading text-sm text-textPrimary">Total</Text>
             <PriceText amount={order.total_amount} size="md" />
@@ -444,14 +503,14 @@ export default function StaffOrderScreen() {
           {cashUnpaid ? (
             <>
               {needsVerify ? (
-                <Text className="mb-1 text-center text-xs font-medium text-amber-700">
+                <Text className="mb-1 text-center text-xs font-medium text-warning">
                   Verify the PWD/Senior ID before confirming payment.
                 </Text>
               ) : null}
               <Pressable
                 onPress={doConfirmCash}
                 disabled={busy || needsVerify}
-                className={`mb-2 flex-row items-center justify-center gap-2 rounded-2xl border border-green-300 bg-green-50 py-3 ${
+                className={`mb-2 flex-row items-center justify-center gap-2 rounded-2xl border border-green-300 bg-successSoft py-3 ${
                   needsVerify ? "opacity-40" : ""
                 }`}
               >
@@ -461,7 +520,7 @@ export default function StaffOrderScreen() {
             </>
           ) : null}
           {action && cashUnpaid ? (
-            <Text className="mb-1 text-center text-xs font-medium text-amber-700">
+            <Text className="mb-1 text-center text-xs font-medium text-warning">
               Confirm cash payment to {action.label.toLowerCase()}.
             </Text>
           ) : null}

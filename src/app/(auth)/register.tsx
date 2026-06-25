@@ -69,7 +69,7 @@ export default function RegisterScreen() {
   }
 
   return (
-    <AuthScaffold tagline="Join Cafinity and start earning rewards." markSize={84}>
+    <AuthScaffold tagline="Join Cafinity and start earning rewards.">
       <Text className="mb-6 font-heading text-2xl text-textPrimary">Create your account</Text>
 
       <View className="flex-row gap-3">
@@ -173,12 +173,12 @@ export default function RegisterScreen() {
       />
 
       {error ? (
-        <View className="mb-4 rounded-xl bg-red-50 p-3">
+        <View className="mb-4 rounded-xl bg-dangerSoft p-3">
           <Text className="text-sm text-danger">{error}</Text>
         </View>
       ) : null}
       {info ? (
-        <View className="mb-4 rounded-xl bg-green-50 p-3">
+        <View className="mb-4 rounded-xl bg-successSoft p-3">
           <Text className="text-sm text-success">{info}</Text>
         </View>
       ) : null}

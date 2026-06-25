@@ -1,0 +1,69 @@
+CAFINITY — PRODUCT PRESENTATION ASSET LIST  (Batch 11)
+======================================================
+Hot / Iced / Default product imagery. Architecture is live now (product_media
+table + resolver); the images below are what to GENERATE so drinks visibly
+switch on Hot/Iced. Code is NOT blocked waiting for them — until an image exists
+the resolver falls back to the default photo.
+
+HOW IMAGES RESOLVE (lib/productMedia.ts resolveProductImage)
+  selected presentation: bundled <slug>-hot/iced.png → remote product_media[hot/iced]
+  → default: bundled <slug>.png → remote product_media.default → products.image_url
+  → category emoji. Bundled (local) is preferred; admin can also upload remote
+  Hot/Iced via the Product Builder (edit mode, when Temperature is attached).
+
+SPECS (per 11.9)
+  Path: assets/images/products/   Size: 1000x1000   Format: PNG
+  No text / price / badge. Same warm premium café framing as existing photos.
+  ICED: clear takeaway cup, visible ice + condensation, recognizable layers.
+  HOT : ceramic or hot takeaway cup, steam where appropriate, same recipe identity.
+  Filename: <existing-slug>-hot.png  /  <existing-slug>-iced.png
+
+STATUS KEYS: FOUND/INTEGRATED · CAN REUSE AS HOT/ICED · REQUIRED · NOT APPLICABLE
+
+>>> UPDATE 2026-06-25: all 31 supplied Hot/Iced PNGs verified (1254x1254 except
+    matcha-latte-iced.png = 1122x1402 portrait; renders fine via contentFit cover)
+    and wired into PRESENTATION_IMAGES (keyed by product name). Bundled & in the
+    export. NO images remain required.
+
+PERMANENT DRINKS (Temperature: Hot + Iced)
+  Product               Default          Hot                  Iced
+  americano             FOUND            INTEGRATED           INTEGRATED
+  cappuccino            FOUND            CAN REUSE AS HOT     INTEGRATED
+  spanish latte         FOUND            INTEGRATED           INTEGRATED
+  brown sugar latte     FOUND            INTEGRATED           INTEGRATED
+  flat white            FOUND            CAN REUSE AS HOT     INTEGRATED
+  caramel macchiato     FOUND            INTEGRATED           INTEGRATED
+  matcha latte          FOUND            INTEGRATED           INTEGRATED (iced PNG portrait)
+  hot chocolate         FOUND            CAN REUSE AS HOT     INTEGRATED
+  strawberry milk       FOUND            CAN REUSE AS HOT(def) CAN REUSE AS ICED (default)
+
+PERMANENT PASTRIES (Temperature: none)
+  butter croissant      FOUND            NOT APPLICABLE       NOT APPLICABLE
+  chocolate muffin      FOUND            NOT APPLICABLE       NOT APPLICABLE
+  cheesecake slice      FOUND            NOT APPLICABLE       NOT APPLICABLE
+
+SEASONAL DRINKS (phase15/16)
+  mango latte                  FOUND  INTEGRATED          INTEGRATED
+  mango cream frappe           FOUND  CAN REUSE (default) CAN REUSE AS ICED (default)
+  matcha strawberry latte      FOUND  INTEGRATED          INTEGRATED
+  caramel cookie latte         FOUND  INTEGRATED          INTEGRATED
+  peppermint mocha             FOUND  INTEGRATED          INTEGRATED
+  gingerbread latte            FOUND  INTEGRATED          INTEGRATED
+  strawberry red velvet latte  FOUND  INTEGRATED          INTEGRATED
+  choco strawberry mocha       FOUND  INTEGRATED          INTEGRATED
+  ube latte                    FOUND  INTEGRATED          INTEGRATED
+  taro milk tea                FOUND  CAN REUSE (default) CAN REUSE AS ICED (default)
+  blueberry cloud latte        FOUND  INTEGRATED          INTEGRATED
+  blueberry rain fizz          FOUND  CAN REUSE (default) CAN REUSE AS ICED (default)
+  blueberry cheesecake         FOUND  NOT APPLICABLE      NOT APPLICABLE
+
+NOTES
+  - "Default photo" status is from the bundled productImages.ts map; the visual
+    Hot/Iced/Neutral call is a best-effort guess from the file's likely composition
+    — verify against the actual artwork and adjust CAN REUSE markings.
+  - Pastries and the Butterfly Pea Blueberry Fizz have no Temperature group → no
+    Hot/Iced slots are shown (admin) and none are requested.
+  - To wire a generated image: drop <slug>-hot.png / <slug>-iced.png into
+    assets/images/products/ and add a line to PRESENTATION_IMAGES in
+    src/lib/productMedia.ts (e.g. "americano": { hot: require("..."), iced: require("...") }).
+  - Or upload per product in Admin → Menu → product → Hot/Iced images (remote).

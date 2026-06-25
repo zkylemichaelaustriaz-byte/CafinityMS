@@ -365,10 +365,10 @@ export default function AdminCampaignsScreen() {
                   </Text>
                 </View>
                 <View
-                  className={`rounded-full px-2.5 py-1 ${c.is_active ? "bg-green-100" : "bg-stone-200"}`}
+                  className={`rounded-full px-2.5 py-1 ${c.is_active ? "bg-green-100" : "bg-surfaceMuted"}`}
                 >
                   <Text
-                    className={`text-xs font-semibold ${c.is_active ? "text-green-700" : "text-stone-600"}`}
+                    className={`text-xs font-semibold ${c.is_active ? "text-success" : "text-textSecondary"}`}
                   >
                     {c.is_active ? "Active" : "Off"}
                   </Text>

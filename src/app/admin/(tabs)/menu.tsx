@@ -85,7 +85,7 @@ export default function AdminMenuScreen() {
         <Text className="font-display text-2xl text-textPrimary">Menu</Text>
         <Pressable
           onPress={() => router.push("/admin/product/new")}
-          className="flex-row items-center gap-1 rounded-full bg-brand-500 px-3.5 py-2"
+          className="flex-row items-center gap-1 rounded-full bg-brandPrimary px-3.5 py-2"
         >
           <Ionicons name="add" size={18} color="#fff" />
           <Text className="text-sm font-bold text-white">New</Text>
@@ -124,7 +124,7 @@ export default function AdminMenuScreen() {
               <Pressable
                 onPress={() => setCategory(item)}
                 className={`h-9 justify-center rounded-full px-4 ${
-                  active ? "bg-brand-500" : "border border-line bg-surface"
+                  active ? "bg-brandPrimary" : "border border-line bg-surface"
                 }`}
               >
                 <Text
@@ -160,7 +160,7 @@ export default function AdminMenuScreen() {
           renderItem={({ item }) => (
             <Pressable
               onPress={() => router.push(`/admin/product/${item.id}`)}
-              className="flex-row items-center rounded-2xl border border-brand-100 bg-white p-3"
+              className="flex-row items-center rounded-2xl border border-brand-100 bg-surface p-3"
             >
               <ProductImage
                 source={localProductImage(item.name)}
@@ -174,7 +174,7 @@ export default function AdminMenuScreen() {
                 <Text className="text-base font-bold text-espresso" numberOfLines={1}>
                   {item.name}
                 </Text>
-                <Text className="text-xs text-stone-400">
+                <Text className="text-xs text-textMuted">
                   {item.category_name} · {priceLabel(item)} · {item.variants.length} size
                   {item.variants.length === 1 ? "" : "s"}
                 </Text>

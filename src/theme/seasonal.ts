@@ -14,8 +14,11 @@ import type { ThemeVars } from "@/theme/vars";
 import type { ThemeColors } from "@/constants/theme";
 
 type RGB = [number, number, number];
+type Mode = "light" | "dark";
 const WHITE: RGB = [255, 255, 255];
 const BLACK: RGB = [0, 0, 0];
+/** Dark-mode surface base used to tint soft accent backgrounds. */
+const DARK_SURFACE: RGB = [30, 28, 25];
 
 function hexToRgb(hex: string): RGB {
   const h = hex.replace("#", "");
@@ -51,10 +54,36 @@ function isDefault(key?: string | null): boolean {
  * CSS-variable overrides for the className side (merged over the base scheme).
  * Returns {} for the default/no-campaign case so base tokens win.
  */
-export function seasonalVars(key?: string | null): ThemeVars {
+export function seasonalVars(key?: string | null, mode: Mode = "light"): ThemeVars {
   const preset = presetByKey(key ?? undefined);
   if (!preset || isDefault(key)) return {};
   const a = hexToRgb(preset.accent);
+
+  if (mode === "dark") {
+    return {
+      "--color-accent": ch(lighten(a, 0.08)),
+      "--color-accent-500": ch(a),
+      "--color-accent-400": ch(lighten(a, 0.14)),
+      "--color-accent-300": ch(lighten(a, 0.04)), // selected borders stay vivid
+      "--color-accent-200": ch(mix(a, DARK_SURFACE, 0.55)),
+      "--color-accent-100": ch(mix(a, DARK_SURFACE, 0.8)), // dark-tinted soft bg
+      "--color-accent-600": ch(darken(a, 0.1)),
+      "--color-accent-700": ch(darken(a, 0.22)),
+      // CTA brightened so it reads on dark surfaces.
+      "--color-brandPrimary": ch(lighten(a, 0.1)),
+      "--color-brandSecondary": ch(lighten(a, 0.02)),
+      "--color-secondary": ch(lighten(a, 0.06)),
+      "--color-secondary-500": ch(lighten(a, 0.06)),
+      "--color-secondary-600": ch(a),
+      "--color-secondary-soft": ch(mix(a, DARK_SURFACE, 0.82)),
+      // Hero panel: deep but still visibly the accent on a dark app.
+      "--color-brand-900": ch(darken(a, 0.42)),
+      "--color-brand-800": ch(darken(a, 0.3)),
+      "--color-caramel": ch(lighten(a, 0.08)),
+      "--color-matcha": ch(lighten(a, 0.06)),
+    };
+  }
+
   return {
     "--color-accent": ch(a),
     "--color-accent-500": ch(a),
@@ -85,10 +114,23 @@ export function seasonalVars(key?: string | null): ThemeVars {
  * JS-side overrides for the `Colors`/`theme` proxies (icons, tab tints, SVG
  * decorations). Returns null for the default/no-campaign case.
  */
-export function seasonalColors(key?: string | null): Partial<ThemeColors> | null {
+export function seasonalColors(
+  key?: string | null,
+  mode: Mode = "light",
+): Partial<ThemeColors> | null {
   const preset = presetByKey(key ?? undefined);
   if (!preset || isDefault(key)) return null;
   const a = hexToRgb(preset.accent);
+  if (mode === "dark") {
+    return {
+      accent: hex(lighten(a, 0.08)),
+      accentSoft: hex(mix(a, DARK_SURFACE, 0.8)),
+      brandPrimary: hex(lighten(a, 0.1)),
+      brandSecondary: hex(lighten(a, 0.02)),
+      secondary: hex(lighten(a, 0.06)),
+      secondarySoft: hex(mix(a, DARK_SURFACE, 0.82)),
+    };
+  }
   return {
     accent: preset.accent,
     accentSoft: hex(lighten(a, 0.84)),

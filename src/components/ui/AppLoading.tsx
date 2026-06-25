@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { ActivityIndicator, Animated, Pressable, Text, View } from "react-native";
-import { Image } from "expo-image";
 import { CoffeeCup } from "@/components/brand/CoffeeCup";
 import { Colors } from "@/constants/theme";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { brandingImages } from "@/lib/brandingImages";
 
 /**
- * Branded in-app boot/loading screen (demonstrable in Expo Go). Uses the bundled
- * loading mark + wordmark, falling back to the in-app CoffeeCup SVG + text if a
- * raster asset fails. Reduced-motion-safe; includes timeout/retry.
+ * Branded in-app boot/loading screen.
+ *
+ * NOTE: the supplied cafinity-loading-mark.png / cafinity-wordmark.png ship with
+ * a checkerboard BAKED into their pixels (RGB, no real alpha), so they would
+ * render an ugly checker on the cream background. We therefore use the in-app
+ * CoffeeCup SVG + styled wordmark text instead — branded, crisp, and tinted by
+ * the active seasonal campaign accent. Reduced-motion-safe; timeout/retry.
  */
 export function AppLoading({
   message,
@@ -23,11 +25,13 @@ export function AppLoading({
   const reduced = useReducedMotion();
   const pulse = useRef(new Animated.Value(reduced ? 1 : 0.5)).current;
   const wordmarkOpacity = useRef(new Animated.Value(reduced ? 1 : 0)).current;
-  const [markFailed, setMarkFailed] = useState(false);
-  const [wordmarkFailed, setWordmarkFailed] = useState(false);
 
   useEffect(() => {
-    if (reduced) return;
+    if (reduced) {
+      pulse.setValue(1);
+      wordmarkOpacity.setValue(1);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
@@ -47,32 +51,15 @@ export function AppLoading({
   return (
     <View className="flex-1 items-center justify-center bg-background">
       <Animated.View style={{ opacity: reduced ? 1 : pulse }}>
-        {markFailed ? (
-          <CoffeeCup size={96} />
-        ) : (
-          <Image
-            source={brandingImages.loadingMark}
-            style={{ width: 112, height: 112 }}
-            contentFit="contain"
-            onError={() => setMarkFailed(true)}
-            accessibilityLabel="Cafinity"
-          />
-        )}
+        <CoffeeCup size={104} tint={Colors.accent} />
       </Animated.View>
 
-      {wordmarkFailed ? (
-        <Text className="mt-4 font-display text-2xl text-brandPrimary">Cafinity</Text>
-      ) : (
-        <Animated.View style={{ opacity: wordmarkOpacity }}>
-          <Image
-            source={brandingImages.wordmark}
-            style={{ width: 180, height: 56, marginTop: 12 }}
-            contentFit="contain"
-            onError={() => setWordmarkFailed(true)}
-            accessibilityLabel="Cafinity"
-          />
-        </Animated.View>
-      )}
+      <Animated.View style={{ opacity: wordmarkOpacity }}>
+        <Text className="mt-4 font-display text-3xl text-brandPrimary">Cafinity</Text>
+        <Text className="mt-0.5 text-center text-[11px] uppercase tracking-[3px] text-textMuted">
+          Coffee &amp; more
+        </Text>
+      </Animated.View>
 
       {timedOut ? (
         <View className="mt-6 items-center px-10">
@@ -87,7 +74,7 @@ export function AppLoading({
         </View>
       ) : (
         <>
-          <ActivityIndicator className="mt-5" color={Colors.brand} />
+          <ActivityIndicator className="mt-6" color={Colors.brand} />
           {message ? <Text className="mt-2 text-xs text-textMuted">{message}</Text> : null}
         </>
       )}

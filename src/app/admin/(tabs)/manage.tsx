@@ -1,12 +1,17 @@
-import { Alert, Pressable, Text, View } from "react-native";
+import { useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { Avatar } from "@/components/ui/Avatar";
+import { AppearanceToggle } from "@/components/ui/AppearanceToggle";
+import { AvatarPicker } from "@/components/ui/AvatarPicker";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
+import { brandingImages } from "@/lib/brandingImages";
 import { presetByKey } from "@/lib/campaignPresets";
+import { formatDateTime } from "@/lib/format";
 import { seasonalSwatch } from "@/theme/seasonal";
 import { useAuth } from "@/store/auth";
 import { useSeasonalTheme } from "@/store/seasonalTheme";
@@ -17,9 +22,8 @@ export default function AdminManageScreen() {
   const session = useAuth((s) => s.session);
   const signOut = useAuth((s) => s.signOut);
   const activeKey = useSeasonalTheme((s) => s.activeKey);
+  const [coverFailed, setCoverFailed] = useState(false);
 
-  const initials =
-    `${profile?.first_name?.[0] ?? ""}${profile?.last_name?.[0] ?? ""}`.toUpperCase() || "☕";
   const fullName =
     `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim() || "Administrator";
 
@@ -29,7 +33,19 @@ export default function AdminManageScreen() {
   function confirmSignOut() {
     Alert.alert("Sign out?", "You'll need to sign in again.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: () => void signOut() },
+      {
+        text: "Sign out",
+        style: "destructive",
+        onPress: async () => {
+          const { networkFailed } = await signOut();
+          if (networkFailed) {
+            Alert.alert(
+              "Signed out on this device",
+              "We couldn't reach the server, so another active session may remain signed in.",
+            );
+          }
+        },
+      },
     ]);
   }
 
@@ -40,8 +56,27 @@ export default function AdminManageScreen() {
       </View>
 
       <View className="p-5 pt-1">
-        <View className="items-center rounded-panel bg-brand-900 p-6">
-          <Avatar initials={initials} size={72} />
+        <View className="items-center overflow-hidden rounded-panel bg-brand-900 p-6">
+          {!coverFailed ? (
+            <Image
+              source={brandingImages.adminDashboardHero}
+              onError={() => setCoverFailed(true)}
+              contentFit="cover"
+              transition={300}
+              cachePolicy="memory-disk"
+              style={StyleSheet.absoluteFill}
+              accessible={false}
+            />
+          ) : null}
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: Colors.accent, opacity: 0.14 }]}
+          />
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: 0.5 }]}
+          />
+          <AvatarPicker size={72} />
           <Text className="mt-3 font-display text-xl text-white">{fullName}</Text>
           <Text className="text-sm text-brand-200">
             {profile?.email || session?.user.email || ""}
@@ -49,6 +84,11 @@ export default function AdminManageScreen() {
           <View className="mt-2">
             <Badge label={(profile?.role ?? "admin").toUpperCase()} tone="green" />
           </View>
+          {profile ? (
+            <Text className="mt-1 text-xs text-brand-300">
+              Member since {formatDateTime(profile.created_at)}
+            </Text>
+          ) : null}
         </View>
 
         {/* Active seasonal theme readout */}
@@ -93,6 +133,11 @@ export default function AdminManageScreen() {
             <Ionicons name="chevron-forward" size={18} color="#C9A47C" />
           </Pressable>
         </View>
+
+        <Text className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-textMuted">
+          Appearance
+        </Text>
+        <AppearanceToggle />
 
         <View className="mt-6">
           <Button label="Sign out" variant="danger" onPress={confirmSignOut} />

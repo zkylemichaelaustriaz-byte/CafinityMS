@@ -15,7 +15,7 @@ import { Colors, shadow } from "@/constants/theme";
 import { getOrders } from "@/lib/api";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { humanizeError } from "@/lib/errors";
-import { formatDateTime, formatEta, statusLabel } from "@/lib/format";
+import { formatDateTime, formatEta, pickupOrRef, statusLabel } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { localProductImage } from "@/lib/productImages";
 import type { Order, OrderStatus } from "@/types/models";
@@ -154,7 +154,7 @@ export default function OrdersScreen() {
               className={`flex-1 items-center rounded-xl py-2.5 ${on ? "bg-surface" : ""}`}
               style={on ? shadow.card : undefined}
             >
-              <Text className={`text-sm font-semibold ${on ? "text-textPrimary" : "text-textMuted"}`}>
+              <Text className={`text-sm font-semibold ${on ? "text-brandPrimary" : "text-textMuted"}`}>
                 {label}
                 {n > 0 ? ` ${n}` : ""}
               </Text>
@@ -271,7 +271,7 @@ function ActiveOrderCard({ order, onTrack }: { order: Order; onTrack: () => void
       onPress={onTrack}
       haptic="light"
       accessibilityRole="button"
-      accessibilityLabel={`${order.order_number ?? "Order"}, ${statusLabel(order.status)}. Tap to track.`}
+      accessibilityLabel={`Pickup ${pickupOrRef(order)}, ${statusLabel(order.status)}. Tap to track.`}
       className="flex-row overflow-hidden rounded-card border border-line bg-surface"
       style={shadow.card}
     >
@@ -279,7 +279,7 @@ function ActiveOrderCard({ order, onTrack }: { order: Order; onTrack: () => void
       <View className="flex-1 p-4">
         <View className="flex-row items-center justify-between">
           <Text className="font-display text-lg text-textPrimary">
-            {order.order_number ?? "Order"}
+            {pickupOrRef(order)}
           </Text>
           <Badge label={statusLabel(order.status)} tone={chipTone(order.status)} />
         </View>
@@ -316,14 +316,14 @@ function CompactOrderRow({
     <AnimatedPressable
       onPress={onOpen}
       accessibilityRole="button"
-      accessibilityLabel={`${order.order_number ?? "Order"}, ${statusLabel(order.status)}. Tap for details.`}
+      accessibilityLabel={`Pickup ${pickupOrRef(order)}, ${statusLabel(order.status)}. Tap for details.`}
       className="flex-row items-center rounded-card border border-line bg-surface p-3"
     >
       <Thumbs order={order} />
       <View className="ml-3 flex-1">
         <View className="flex-row items-center gap-2">
           <Text className="font-display text-base text-textPrimary">
-            {order.order_number ?? "Order"}
+            {pickupOrRef(order)}
           </Text>
           <Badge label={statusLabel(order.status)} tone={chipTone(order.status)} />
         </View>

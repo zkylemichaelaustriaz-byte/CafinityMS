@@ -249,7 +249,7 @@ export default function AdminSettingsScreen() {
               <Pressable
                 key={b.id}
                 onPress={() => setBranchId(b.id)}
-                className={`rounded-full px-3.5 py-2 ${active ? "bg-brand-500" : "border border-line bg-surface"}`}
+                className={`rounded-full px-3.5 py-2 ${active ? "bg-brandPrimary" : "border border-line bg-surface"}`}
               >
                 <Text className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}>
                   {b.name}

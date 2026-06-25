@@ -11,43 +11,42 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Animated, {
-  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
   withSpring,
-  withTiming,
 } from "react-native-reanimated";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Header } from "@/components/ui/Header";
 import { useKeyboardAwareScroll } from "@/components/ui/KeyboardAwareScrollView";
+import { OrderProgress } from "@/components/ui/OrderProgress";
+import { PickupQR } from "@/components/ui/PickupQR";
 import { PriceText } from "@/components/ui/PriceText";
 import { ProductImage } from "@/components/ui/ProductImage";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { localProductImage } from "@/lib/productImages";
+import { presentationFromOptionNames, resolveProductImage } from "@/lib/productMedia";
 import {
   cancelMyOrder,
   getAppSettings,
   getFeedbackForOrder,
   getOrder,
+  getOrdersAhead,
   subscribeOrder,
   submitFeedback,
 } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
-import { formatDateTime, formatEta, formatReadyAround, peso, statusLabel } from "@/lib/format";
+import {
+  formatDateTime,
+  formatEta,
+  formatReadyAround,
+  peso,
+  pickupNumber,
+  statusLabel,
+} from "@/lib/format";
 import { notifyLocal } from "@/lib/notify";
 import type { Order, OrderStatus } from "@/types/models";
-
-const STEPS: OrderStatus[] = ["pending", "preparing", "ready", "completed"];
-const STEP_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
-  pending: "receipt-outline",
-  preparing: "cafe-outline",
-  ready: "checkmark-circle-outline",
-  completed: "bag-check-outline",
-};
 
 export default function OrderScreen() {
   const { id, new: isNew } = useLocalSearchParams<{ id: string; new?: string }>();
@@ -56,6 +55,8 @@ export default function OrderScreen() {
 
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const [ordersAhead, setOrdersAhead] = useState<number | null>(null);
+  const [stepsExpanded, setStepsExpanded] = useState(false);
   const prevStatus = useRef<OrderStatus | null>(null);
 
   const [rating, setRating] = useState(0);
@@ -101,6 +102,18 @@ export default function OrderScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Queue position for the active stages (best-effort, refreshed on status change).
+  useEffect(() => {
+    if (!id || !order) return;
+    if (order.status === "pending" || order.status === "preparing") {
+      getOrdersAhead(id)
+        .then(setOrdersAhead)
+        .catch(() => setOrdersAhead(null));
+    } else {
+      setOrdersAhead(null);
+    }
+  }, [id, order]);
 
   useEffect(() => {
     getAppSettings()
@@ -180,7 +193,6 @@ export default function OrderScreen() {
   }
 
   const cancelled = order.status === "cancelled";
-  const currentIndex = STEPS.indexOf(order.status);
   const isReady = order.status === "ready";
   const withinWindow =
     cancelPolicy.policy !== "within_n_minutes" ||
@@ -224,10 +236,10 @@ export default function OrderScreen() {
           <View className="flex-row items-center justify-between">
             <View>
               <Text className="text-[11px] uppercase tracking-wide text-textMuted">
-                Order number
+                Pickup number
               </Text>
-              <Text className="font-display text-xl text-textPrimary">
-                {order.order_number ?? "—"}
+              <Text className="font-display text-3xl text-textPrimary">
+                {pickupNumber(order) ?? order.order_number ?? "—"}
               </Text>
             </View>
             <Badge
@@ -244,52 +256,30 @@ export default function OrderScreen() {
             />
           </View>
           <Text className="mt-1 text-xs text-textMuted">
-            Placed {formatDateTime(order.created_at)}
+            {order.order_number ? `Ref ${order.order_number} · ` : ""}Placed{" "}
+            {formatDateTime(order.created_at)}
           </Text>
 
           {!cancelled ? (
             <>
-              {/* Timeline */}
-              <View className="mt-5 flex-row">
-                {STEPS.map((s, i) => {
-                  const done = i <= currentIndex;
-                  const active = i === currentIndex;
-                  return (
-                    <View key={s} className="flex-1 items-center">
-                      <View className="w-full flex-row items-center">
-                        <View
-                          className={`h-1 flex-1 rounded-full ${i === 0 ? "opacity-0" : done ? "bg-brandPrimary" : "bg-line"}`}
-                        />
-                        <View className="items-center justify-center">
-                          {active && !cancelled && order.status !== "completed" ? (
-                            <PulseRing />
-                          ) : null}
-                          <View
-                            className={`h-9 w-9 items-center justify-center rounded-full ${
-                              done ? "bg-brandPrimary" : "bg-surfaceMuted"
-                            }`}
-                          >
-                            <Ionicons
-                              name={STEP_ICON[s]}
-                              size={18}
-                              color={done ? "#fff" : "#C9A47C"}
-                            />
-                          </View>
-                        </View>
-                        <View
-                          className={`h-1 flex-1 rounded-full ${i === STEPS.length - 1 ? "opacity-0" : i < currentIndex ? "bg-brandPrimary" : "bg-line"}`}
-                        />
-                      </View>
-                      <Text
-                        className={`mt-1.5 text-center text-[10px] font-semibold ${
-                          done ? "text-brandPrimary" : "text-textMuted"
-                        }`}
-                      >
-                        {statusLabel(s)}
-                      </Text>
-                    </View>
-                  );
-                })}
+              {/* Live progress — compact by default, expandable to the full timeline */}
+              <View className="mt-5">
+                <OrderProgress order={order} variant={stepsExpanded ? "vertical" : "horizontal"} />
+                <Pressable
+                  onPress={() => setStepsExpanded((v) => !v)}
+                  hitSlop={6}
+                  className="mt-3 flex-row items-center gap-1 self-start"
+                  accessibilityLabel={stepsExpanded ? "Hide all steps" : "Show all steps"}
+                >
+                  <Text className="text-xs font-semibold text-brandPrimary">
+                    {stepsExpanded ? "Hide steps" : "Show all steps"}
+                  </Text>
+                  <Ionicons
+                    name={stepsExpanded ? "chevron-up" : "chevron-down"}
+                    size={14}
+                    color={Colors.brand}
+                  />
+                </Pressable>
               </View>
 
               {/* Contextual stage message */}
@@ -297,7 +287,7 @@ export default function OrderScreen() {
                 className={`mt-4 rounded-xl p-3 ${isReady ? "bg-accent-100" : "bg-surfaceMuted"}`}
               >
                 <Text
-                  className={`text-sm font-medium ${isReady ? "text-brand-800" : "text-textSecondary"}`}
+                  className={`text-sm font-medium ${isReady ? "text-textPrimary" : "text-textSecondary"}`}
                 >
                   {statusMessage(order.status)}
                 </Text>
@@ -315,9 +305,28 @@ export default function OrderScreen() {
                   </Text>
                 </View>
               ) : null}
+
+              {/* Queue position */}
+              {order.status === "pending" || order.status === "preparing" ? (
+                <View className="mt-3 rounded-xl border border-line bg-surfaceMuted p-3">
+                  <View className="flex-row items-center gap-1.5">
+                    <Ionicons name="people-outline" size={15} color={Colors.brand} />
+                    <Text className="text-xs font-medium text-textSecondary">
+                      {ordersAhead == null
+                        ? "Your order is in the queue. We'll update the estimate shortly."
+                        : ordersAhead === 0
+                          ? "You're next in the queue."
+                          : `${ordersAhead} order${ordersAhead === 1 ? "" : "s"} ahead of you`}
+                    </Text>
+                  </View>
+                  <Text className="mt-1 text-[11px] text-textMuted">
+                    Updated {formatDateTime(order.eta_calculated_at ?? order.updated_at)}
+                  </Text>
+                </View>
+              ) : null}
             </>
           ) : (
-            <View className="mt-4 rounded-xl bg-red-50 p-3">
+            <View className="mt-4 rounded-xl bg-dangerSoft p-3">
               <Text className="text-sm font-medium text-danger">
                 This order was cancelled.
               </Text>
@@ -325,15 +334,22 @@ export default function OrderScreen() {
           )}
         </View>
 
+        {/* Pickup QR — active orders only (hidden once completed/cancelled) */}
+        {!cancelled && order.status !== "completed" ? (
+          <View className="mt-4">
+            <PickupQR order={order} />
+          </View>
+        ) : null}
+
         {/* Statutory discount verification */}
         {order.statutory_discount_type ? (
           <View
             className={`mt-4 flex-row items-center gap-2 rounded-xl border p-3 ${
               order.discount_verification === "verified"
-                ? "border-green-200 bg-green-50"
+                ? "border-green-200 bg-successSoft"
                 : order.discount_verification === "rejected"
-                  ? "border-red-200 bg-red-50"
-                  : "border-amber-300 bg-amber-50"
+                  ? "border-red-200 bg-dangerSoft"
+                  : "border-warning bg-warningSoft"
             }`}
           >
             <Ionicons
@@ -378,7 +394,13 @@ export default function OrderScreen() {
           {(order.order_items ?? []).map((it) => (
             <View key={it.id} className="mb-3 flex-row">
               <ProductImage
-                source={localProductImage(it.product_name)}
+                {...resolveProductImage(
+                  { name: it.product_name },
+                  it.presentation_key ??
+                    presentationFromOptionNames(
+                      it.order_item_customization.map((c) => c.option_name),
+                    ),
+                )}
                 emoji="☕"
                 emojiSize={18}
                 className="mr-3 h-12 w-12 rounded-xl"
@@ -564,6 +586,17 @@ export default function OrderScreen() {
           </View>
         ) : null}
 
+        {/* Digital receipt */}
+        {!cancelled ? (
+          <View className="mt-3">
+            <Button
+              label="View digital receipt"
+              variant="outline"
+              onPress={() => router.push(`/receipt/${order.id}`)}
+            />
+          </View>
+        ) : null}
+
         {/* Feedback */}
         {order.status === "completed" ? (
           <View className="mt-5 rounded-card border border-line bg-surface p-4">
@@ -623,27 +656,6 @@ export default function OrderScreen() {
         ) : null}
       </ScrollView>
     </Screen>
-  );
-}
-
-function PulseRing() {
-  const reduced = useReducedMotion();
-  const v = useSharedValue(0);
-  useEffect(() => {
-    if (reduced) return;
-    v.value = withRepeat(withTiming(1, { duration: 1400 }), -1, false);
-    return () => cancelAnimation(v);
-  }, [reduced, v]);
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + v.value * 0.8 }],
-    opacity: 0.45 * (1 - v.value),
-  }));
-  return (
-    <Animated.View
-      style={style}
-      className="absolute h-9 w-9 rounded-full bg-accent"
-      pointerEvents="none"
-    />
   );
 }
 

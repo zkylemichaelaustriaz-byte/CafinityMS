@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   Text,
   TextInput,
   View,
@@ -31,6 +32,7 @@ export default function AdminInventoryScreen() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [refreshing, setRefreshing] = useState(false);
 
   function toggleExpand(name: string) {
     setExpanded((prev) => {
@@ -69,6 +71,12 @@ export default function AdminInventoryScreen() {
       void load();
     }, [load]),
   );
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
 
   async function commitStock(row: InventoryRow, text: string) {
     const qty = Math.max(0, parseInt(text, 10) || 0);
@@ -195,11 +203,11 @@ export default function AdminInventoryScreen() {
               <Pressable
                 onPress={() => setBranchId(item.id)}
                 className={`rounded-full px-4 py-2 ${
-                  active ? "bg-brand-500" : "bg-white border border-brand-100"
+                  active ? "bg-brandPrimary" : "bg-surface border border-brand-100"
                 }`}
               >
                 <Text
-                  className={`text-sm font-semibold ${active ? "text-white" : "text-brand-700"}`}
+                  className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}
                 >
                   {item.name}
                 </Text>
@@ -267,6 +275,9 @@ export default function AdminInventoryScreen() {
           keyExtractor={(g) => g.name}
           contentContainerClassName="p-4 gap-2"
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brand} />
+          }
           ListEmptyComponent={
             <View className="mt-10 items-center px-8">
               <Ionicons name="search-outline" size={32} color={Colors.textMuted} />
@@ -281,7 +292,7 @@ export default function AdminInventoryScreen() {
             const open = autoExpand || expanded.has(g.name);
             return (
               <View
-                className={`overflow-hidden rounded-2xl border bg-white ${
+                className={`overflow-hidden rounded-2xl border bg-surface ${
                   g.outC > 0 ? "border-red-200" : g.lowC > 0 ? "border-amber-200" : "border-brand-100"
                 }`}
               >
@@ -300,7 +311,7 @@ export default function AdminInventoryScreen() {
                     <Text className="text-sm font-bold text-espresso" numberOfLines={1}>
                       {g.name}
                     </Text>
-                    <Text className="text-xs text-stone-400">
+                    <Text className="text-xs text-textMuted">
                       {g.size} size{g.size === 1 ? "" : "s"} · {g.total} in stock
                     </Text>
                     <View className="mt-1 flex-row gap-1.5">
@@ -357,14 +368,14 @@ function VariantRow({
     <View className={`flex-row items-center py-2.5 ${last ? "" : "border-b border-line"}`}>
       <View className="flex-1 pr-2">
         <Text className="text-sm font-semibold text-espresso">{row.variant_name}</Text>
-        <Text className="text-xs text-stone-400">{peso(row.price)}</Text>
+        <Text className="text-xs text-textMuted">{peso(row.price)}</Text>
         <View className="mt-0.5 flex-row gap-1.5">
           {out ? <Badge label="Out" tone="red" /> : low ? <Badge label="Low" tone="amber" /> : null}
           {!row.is_available && !out ? <Badge label="Hidden" tone="gray" /> : null}
         </View>
       </View>
       <View className="items-center">
-        <Text className="text-[10px] text-stone-400">Stock</Text>
+        <Text className="text-[10px] text-textMuted">Stock</Text>
         <TextInput
           defaultValue={String(row.stock_quantity)}
           keyboardType="number-pad"
@@ -402,7 +413,7 @@ function FilterChip({
     <Pressable
       onPress={onPress}
       className={`flex-1 items-center rounded-full border py-2 ${
-        active ? "border-brand-500 bg-brand-500" : "border-line bg-surface"
+        active ? "border-brandPrimary bg-brandPrimary" : "border-line bg-surface"
       }`}
     >
       <Text className={`text-xs font-semibold ${active ? "text-white" : "text-textSecondary"}`}>

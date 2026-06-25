@@ -49,6 +49,19 @@ export function formatDistance(km: number | null): string {
   return `${km.toFixed(1)} km away`;
 }
 
+/** Friendly pickup number ("#042") or null when not assigned (legacy orders). */
+export function pickupNumber(o: { display_queue_number?: number | null }): string | null {
+  return o.display_queue_number != null ? `#${String(o.display_queue_number).padStart(3, "0")}` : null;
+}
+
+/** Customer-facing order label: pickup number, else the canonical reference. */
+export function pickupOrRef(o: {
+  display_queue_number?: number | null;
+  order_number?: string | null;
+}): string {
+  return pickupNumber(o) ?? o.order_number ?? "Order";
+}
+
 /** Short human label for an order status. */
 export function statusLabel(status: string): string {
   switch (status) {

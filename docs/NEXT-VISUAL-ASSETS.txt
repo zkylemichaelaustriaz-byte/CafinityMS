@@ -1,0 +1,56 @@
+CAFINITY — SUPPLIED ASSET AUDIT & INTEGRATION TRACKER
+=====================================================
+Status legend: FOUND (on disk) · INTEGRATED (wired into the app) ·
+UNUSABLE (present but cannot be used as-is) · MISSING.
+Verified 2026-06-24 by reading PNG IHDR headers + visual inspection.
+
+IMPORTANT TRANSPARENCY FINDING
+  Every supplied branding / campaign / product / logo PNG is RGB with NO alpha
+  channel (PNG color type 2). The two loading marks have a CHECKERBOARD BAKED
+  INTO THE PIXELS (confirmed visually) — they are NOT transparent. We do NOT
+  place them on colored backgrounds and do NOT attempt runtime background
+  removal. The in-app loader uses the vector CoffeeCup + styled wordmark text.
+
+BRANDING / HERO ASSETS
+  auth-hero.png ............. INTEGRATED — AuthScaffold via CampaignAwareHero (Login + Register).
+  rewards-hero.png .......... INTEGRATED — Home RewardsHero card + Rewards screen hero (image bg + scrim).
+  profile-cover.png ......... INTEGRATED — Profile identity hero background.
+  admin-dashboard-hero.png .. INTEGRATED — Admin dashboard Revenue hero (restrained, strong scrim).
+  cafinity-loading-mark.png . FOUND/UNUSABLE 1254x1254 RGB 998KB — checkerboard baked in.
+                              Loader uses CoffeeCup SVG instead (INTEGRATED fallback).
+  cafinity-wordmark.png ..... FOUND/UNUSABLE 2172x724  RGB 992KB — checkerboard baked in.
+                              Loader uses styled "Cafinity" text instead (INTEGRATED fallback).
+  home-hero.png ............. FOUND (already integrated on Home, prior phase).
+
+CAMPAIGN ASSETS (Blueberry Rain)
+  campaign-blueberry-rain.png ........... INTEGRATED — campaignImages.ts key "blueberry-rain" (CampaignAd banner).
+  previews/preset-blueberry-rain.png .... INTEGRATED — campaignPreviewImages.ts (admin preset picker thumbnail).
+
+PRODUCT ASSETS (Blueberry Rain)
+  blueberry-cloud-latte.png ... INTEGRATED — productImages "blueberry cloud latte".
+  blueberry-rain-fizz.png ..... INTEGRATED — productImages "butterfly pea blueberry fizz".
+  blueberry-cheesecake.png .... INTEGRATED — productImages "blueberry cheesecake". Filename kept exactly.
+
+APPLICATION LOGO / NATIVE ICON
+  cafinity-logo.png ......... INTEGRATED (MASTER, kept) — app.json iOS `icon` + native splash image now
+                              point here (opaque, no-alpha = ideal for iOS; no clipping concern).
+  icon.png .................. FOUND 1024x1024 RGBA 780KB — no longer referenced (cafinity-logo is the icon).
+  splash-icon.png ........... SUPERSEDED — splash now uses cafinity-logo.png on #2C170A bg (was Expo template).
+  android-icon-foreground.png FOUND 512x512  RGBA 77KB (adaptive foreground, has alpha).
+  android-icon-background.png FOUND 512x512  RGBA 17KB.
+  android-icon-monochrome.png FOUND 432x432  RGBA 4KB.
+
+COMPRESSION NOTE
+  Source PNGs are large (1–2.4 MB each). They bundle and export fine. Recommend a
+  later lossless/visually-safe pass (pngquant/oxipng, or convert heroes to sized
+  JPEG/WebP) before a production build — integrate first, optimize later.
+
+FALLBACKS (current)
+  Product image:   bundled local → products.image_url → category emoji placeholder.
+  Campaign image:  custom hero URL → bundled preset image → campaign-color fallback.
+  Branding hero:   bundled image → vector/gradient fallback.
+  Loading marks:   vector CoffeeCup + text (rasters intentionally bypassed).
+
+EXPO GO vs BUILD
+  Heroes/product/campaign images render in Expo Go. Native launcher icon + splash
+  are NOT verifiable in Expo Go — require an EAS preview/development build.

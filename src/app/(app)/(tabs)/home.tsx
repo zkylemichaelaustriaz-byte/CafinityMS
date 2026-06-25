@@ -10,9 +10,11 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
+import { BranchWorkload } from "@/components/ui/BranchWorkload";
 import { CampaignAd } from "@/components/ui/CampaignAd";
 import { NotificationBell } from "@/components/ui/NotificationBell";
 import { ProductCard } from "@/components/ui/ProductCard";
+import { ProductImage } from "@/components/ui/ProductImage";
 import { RewardsHero } from "@/components/ui/RewardsHero";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -20,6 +22,9 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { Screen } from "@/components/ui/Screen";
 import { CoffeeCup } from "@/components/brand/CoffeeCup";
 import { Colors, shadow } from "@/constants/theme";
+import { presetByKey } from "@/lib/campaignPresets";
+import { resolveProductImage } from "@/lib/productMedia";
+import { useSeasonalTheme } from "@/store/seasonalTheme";
 import {
   getActiveCampaign,
   getCategories,
@@ -32,7 +37,7 @@ import {
 } from "@/lib/api";
 import { brandingImages } from "@/lib/brandingImages";
 import { humanizeError } from "@/lib/errors";
-import { formatEta, statusLabel } from "@/lib/format";
+import { formatEta, pickupOrRef, statusLabel } from "@/lib/format";
 import { useAuth } from "@/store/auth";
 import { useBranch } from "@/store/branch";
 import { useFavorites } from "@/store/favorites";
@@ -56,6 +61,9 @@ export default function HomeScreen() {
   const branch = useBranch((s) => s.branch);
   const favIds = useFavorites((s) => s.ids);
   const loadFavorites = useFavorites((s) => s.load);
+  const seasonalKey = useSeasonalTheme((s) => s.activeKey);
+  const seasonalPreset =
+    seasonalKey && seasonalKey !== "default" ? presetByKey(seasonalKey) : null;
 
   const [menu, setMenu] = useState<MenuProduct[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -223,11 +231,66 @@ export default function HomeScreen() {
             <Text className="text-sm font-bold text-textPrimary" numberOfLines={1}>
               {branch ? branch.name : "Tap to select a branch"}
             </Text>
+            {branch ? (
+              <View className="mt-0.5">
+                <BranchWorkload branchId={branch.id} />
+              </View>
+            ) : null}
           </View>
           <Ionicons name="chevron-forward" size={18} color="#C9A47C" />
         </AnimatedPressable>
 
-        {/* Hero — evergreen branding artwork (does not change with campaigns) */}
+        {/* Active order banner — live status kept near the top.
+            Ready-for-pickup gets a stronger, filled treatment. */}
+        {active ? (
+          active.status === "ready" ? (
+            <AnimatedPressable
+              onPress={() => router.push(`/order/${active.id}`)}
+              className="mx-5 mb-5 flex-row items-center rounded-2xl bg-brandPrimary p-4"
+              style={shadow.floating}
+            >
+              <View className="h-10 w-10 items-center justify-center rounded-full bg-white/20">
+                <Ionicons name="checkmark-circle" size={22} color="#fff" />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-xs font-semibold uppercase tracking-wide text-white/80">
+                  Pickup {pickupOrRef(active)}
+                </Text>
+                <Text className="text-base font-bold text-white">Ready for pickup! 🎉</Text>
+                <Text className="text-xs text-white/80">Head to {branch?.name ?? "the counter"}</Text>
+              </View>
+              <Text className="text-sm font-bold text-white">View</Text>
+              <Ionicons name="chevron-forward" size={16} color="#fff" />
+            </AnimatedPressable>
+          ) : (
+            <AnimatedPressable
+              onPress={() => router.push(`/order/${active.id}`)}
+              className="mx-5 mb-5 flex-row items-center rounded-2xl border border-accent-300 bg-accent-100 p-4"
+            >
+              <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-900">
+                <Ionicons name="cafe" size={18} color="#fff" />
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-xs font-semibold uppercase tracking-wide text-textSecondary">
+                  Active order · Pickup {pickupOrRef(active)}
+                </Text>
+                <Text className="text-sm font-bold text-textPrimary">
+                  {statusLabel(active.status)}
+                </Text>
+                {(active.status === "pending" || active.status === "preparing") &&
+                active.estimated_max_minutes ? (
+                  <Text className="text-xs text-textSecondary">
+                    {formatEta(active.estimated_min_minutes, active.estimated_max_minutes)}
+                  </Text>
+                ) : null}
+              </View>
+              <Text className="text-sm font-bold text-brandPrimary">Track</Text>
+              <Ionicons name="chevron-forward" size={16} color={Colors.brand} />
+            </AnimatedPressable>
+          )
+        ) : null}
+
+        {/* Hero — order-ahead, campaign-aware accent tint */}
         <View
           className="mx-5 mb-5 overflow-hidden rounded-panel bg-brand-900 p-6"
           style={shadow.floating}
@@ -245,6 +308,8 @@ export default function HomeScreen() {
                 onError={() => setHeroFailed(true)}
                 accessibilityLabel="Cafinity coffee"
               />
+              {/* Campaign accent tint so the hero reads under the active season */}
+              <View pointerEvents="none" style={StyleSheet.absoluteFill} className="bg-accent/20" />
               <View pointerEvents="none" style={StyleSheet.absoluteFill} className="bg-black/40" />
             </>
           )}
@@ -268,34 +333,6 @@ export default function HomeScreen() {
             </Text>
           </AnimatedPressable>
         </View>
-
-        {/* Active order banner */}
-        {active ? (
-          <AnimatedPressable
-            onPress={() => router.push(`/order/${active.id}`)}
-            className="mx-5 mb-5 flex-row items-center rounded-2xl border border-accent-300 bg-accent-100 p-4"
-          >
-            <View className="h-10 w-10 items-center justify-center rounded-full bg-brand-900">
-              <Ionicons name="cafe" size={18} color="#fff" />
-            </View>
-            <View className="ml-3 flex-1">
-              <Text className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-                Active order · {active.order_number}
-              </Text>
-              <Text className="text-sm font-bold text-textPrimary">
-                {statusLabel(active.status)}
-              </Text>
-              {(active.status === "pending" || active.status === "preparing") &&
-              active.estimated_max_minutes ? (
-                <Text className="text-xs text-brand-700">
-                  {formatEta(active.estimated_min_minutes, active.estimated_max_minutes)}
-                </Text>
-              ) : null}
-            </View>
-            <Text className="text-sm font-bold text-brandPrimary">Track</Text>
-            <Ionicons name="chevron-forward" size={16} color={Colors.brand} />
-          </AnimatedPressable>
-        ) : null}
 
         {/* Featured */}
         <SectionHeader
@@ -352,17 +389,60 @@ export default function HomeScreen() {
           </ScrollView>
         )}
 
-        {/* Order again */}
+        {/* Seasonal collection — one card instead of another full product rail */}
+        {branch && seasonalPreset ? (
+          <View className="mt-7 px-5">
+            <AnimatedPressable
+              onPress={() => router.push(`/menu?collection=${seasonalPreset.key}`)}
+              haptic="light"
+              className="flex-row items-center rounded-card border border-accent-300 bg-accent-100 p-4"
+            >
+              <View className="h-12 w-12 items-center justify-center rounded-full bg-brand-900">
+                <Text style={{ fontSize: 24 }}>{seasonalPreset.emoji}</Text>
+              </View>
+              <View className="ml-3 flex-1">
+                <Text className="text-[11px] font-semibold uppercase tracking-wide text-brandPrimary">
+                  Seasonal collection
+                </Text>
+                <Text className="font-display text-base text-textPrimary">{seasonalPreset.name}</Text>
+                <Text className="text-xs text-textSecondary" numberOfLines={1}>
+                  {seasonalPreset.subtitle}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={Colors.brand} />
+            </AnimatedPressable>
+          </View>
+        ) : null}
+
+        {/* Order again — compact pills (not another full card rail) */}
         {branch && orderAgain.length > 0 ? (
           <>
             <SectionHeader title="Order again" className="mb-3 mt-7 px-5" />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerClassName="px-5 gap-4"
+              contentContainerClassName="px-5 gap-2"
             >
               {orderAgain.map((p) => (
-                <ProductCard key={p.id} product={p} />
+                <AnimatedPressable
+                  key={p.id}
+                  onPress={() => router.push(`/product/${p.id}`)}
+                  className="flex-row items-center gap-2 rounded-full border border-line bg-surface py-1.5 pl-1.5 pr-4"
+                >
+                  <ProductImage
+                    {...resolveProductImage({ name: p.name, image_url: p.image_url, media: p.media })}
+                    emoji="☕"
+                    emojiSize={14}
+                    className="h-9 w-9 rounded-full"
+                    accessibilityLabel={p.name}
+                  />
+                  <Text
+                    className="max-w-[130px] text-sm font-semibold text-textPrimary"
+                    numberOfLines={1}
+                  >
+                    {p.name}
+                  </Text>
+                </AnimatedPressable>
               ))}
             </ScrollView>
           </>

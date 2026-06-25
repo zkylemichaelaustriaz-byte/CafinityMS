@@ -7,16 +7,16 @@ const bg: Record<Tone, string> = {
   green: "bg-green-100",
   red: "bg-red-100",
   amber: "bg-amber-100",
-  gray: "bg-stone-200",
+  gray: "bg-surfaceMuted",
   blue: "bg-blue-100",
 };
 
 const fg: Record<Tone, string> = {
-  brand: "text-brand-700",
-  green: "text-green-700",
+  brand: "text-textSecondary",
+  green: "text-success",
   red: "text-red-700",
-  amber: "text-amber-800",
-  gray: "text-stone-700",
+  amber: "text-warning",
+  gray: "text-textSecondary",
   blue: "text-blue-700",
 };
 

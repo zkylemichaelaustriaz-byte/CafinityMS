@@ -21,7 +21,7 @@ interface AuthState {
     email: string,
     password: string,
   ) => Promise<{ needsConfirmation: boolean }>;
-  signOut: () => Promise<void>;
+  signOut: () => Promise<{ networkFailed: boolean }>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -76,10 +76,32 @@ export const useAuth = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
-    await supabase.auth.signOut();
-    useFavorites.getState().reset();
+    // 1) Tear down user-specific realtime + cached state FIRST so no listener
+    //    races the session clear (NotificationProvider unmounts on redirect).
     useNotifications.getState().reset();
+    useFavorites.getState().reset();
+
+    // 2) Attempt the remote (global) sign-out, but NEVER let a network failure
+    //    leave the user half-authenticated.
+    let networkFailed = false;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch {
+      networkFailed = true;
+      // Guarantee the session is cleared locally even if the server was
+      // unreachable (local scope does not hit the network).
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch {
+        // Ignore — we clear our own state below regardless.
+      }
+    }
+
+    // 3) Clear our own state. The onAuthStateChange listener also fires, but we
+    //    set here too so logout completes deterministically.
     set({ session: null, profile: null, profileLoaded: true });
+    return { networkFailed };
   },
 
   refreshProfile: async () => {

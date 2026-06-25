@@ -4,16 +4,20 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { RevenueChart, type ChartBucket } from "@/components/admin/RevenueChart";
+import { AnalyticsChart, type ChartPoint } from "@/components/admin/AnalyticsChart";
+import { type ChartBucket } from "@/components/admin/RevenueChart";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ProductImage } from "@/components/ui/ProductImage";
 import { Screen } from "@/components/ui/Screen";
 import { Colors, shadow } from "@/constants/theme";
+import { brandingImages } from "@/lib/brandingImages";
 import {
   getCancellationsSince,
   getFeedbackList,
@@ -67,6 +71,75 @@ function revenueBetween(orders: ReportOrder[], from: number, to: number): number
   return sum;
 }
 
+/** Count of orders placed in [from, to) (demand, incl. all statuses). */
+function ordersBetween(orders: ReportOrder[], from: number, to: number): number {
+  let n = 0;
+  for (const o of orders) {
+    const t = new Date(o.created_at).getTime();
+    if (t >= from && t < to) n += 1;
+  }
+  return n;
+}
+
+interface TimeBucket {
+  label: string;
+  start: number;
+  end: number;
+  highlight: boolean;
+}
+
+/** Time buckets matching the selected period (today=3h blocks, week=days, month=weeks). */
+function bucketsFor(period: Period): TimeBucket[] {
+  const now = new Date();
+  const nowT = now.getTime();
+
+  if (period === "today") {
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [6, 9, 12, 15, 18, 21].map((h) => {
+      const s = new Date(base);
+      s.setHours(h, 0, 0, 0);
+      const e = new Date(base);
+      e.setHours(h + 3, 0, 0, 0);
+      const start = s.getTime();
+      const end = e.getTime();
+      const label = h === 12 ? "12p" : h < 12 ? `${h}a` : `${h - 12}p`;
+      return { label, start, end, highlight: nowT >= start && nowT < end };
+    });
+  }
+
+  if (period === "week") {
+    const startWeek = startOf("week");
+    const names = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+    const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(startWeek);
+      d.setDate(startWeek.getDate() + i);
+      const start = d.getTime();
+      const end = start + 86400000;
+      return { label: names[i], start, end, highlight: start === todayMid };
+    });
+  }
+
+  // month → by week of the month
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+  const buckets: TimeBucket[] = [];
+  let wStart = startOf("month").getTime();
+  let wi = 1;
+  while (wStart < monthEnd) {
+    const end = Math.min(wStart + 7 * 86400000, monthEnd);
+    buckets.push({ label: `W${wi}`, start: wStart, end, highlight: nowT >= wStart && nowT < end });
+    wStart = end;
+    wi += 1;
+  }
+  return buckets;
+}
+
+const PERIOD_SUFFIX: Record<Period, string> = {
+  today: "today, by hour",
+  week: "this week, by day",
+  month: "this month, by week",
+};
+
 export default function AdminReportsScreen() {
   const router = useRouter();
   const [orders, setOrders] = useState<ReportOrder[]>([]);
@@ -76,6 +149,7 @@ export default function AdminReportsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
+  const [heroFailed, setHeroFailed] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -136,22 +210,66 @@ export default function AdminReportsScreen() {
     return { revenue, count, avg: count ? revenue / count : 0, top, prevRevenue, delta };
   }, [orders, period]);
 
-  // Daily revenue for the trailing 7 days (independent of the period toggle).
-  const chart = useMemo<ChartBucket[]>(() => {
-    const names = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-    const now = new Date();
-    const buckets: ChartBucket[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-      const start = d.getTime();
-      buckets.push({
-        label: names[d.getDay()],
-        value: revenueBetween(orders, start, start + 86400000),
-        highlight: i === 0,
-      });
+  // Charts bucketed to MATCH the selected period (revenue trend + demand).
+  const revenueSeries = useMemo<ChartBucket[]>(
+    () =>
+      bucketsFor(period).map((b) => ({
+        label: b.label,
+        value: revenueBetween(orders, b.start, b.end),
+        highlight: b.highlight,
+      })),
+    [orders, period],
+  );
+  const ordersSeries = useMemo<ChartBucket[]>(
+    () =>
+      bucketsFor(period).map((b) => ({
+        label: b.label,
+        value: ordersBetween(orders, b.start, b.end),
+        highlight: b.highlight,
+      })),
+    [orders, period],
+  );
+  const ordersInPeriod = ordersSeries.reduce((s, b) => s + b.value, 0);
+  const periodNoun = period === "today" ? "today" : period === "week" ? "this week" : "this month";
+
+  const revenuePoints = useMemo<ChartPoint[]>(
+    () =>
+      revenueSeries.map((r, i) => ({
+        label: r.label,
+        value: r.value,
+        highlight: r.highlight,
+        readout: `${peso(r.value)} · ${ordersSeries[i].value} ${ordersSeries[i].value === 1 ? "order" : "orders"}`,
+      })),
+    [revenueSeries, ordersSeries],
+  );
+  const ordersPoints = useMemo<ChartPoint[]>(
+    () =>
+      ordersSeries.map((o, i) => ({
+        label: o.label,
+        value: o.value,
+        highlight: o.highlight,
+        readout: `${o.value} ${o.value === 1 ? "order" : "orders"} · ${peso(revenueSeries[i].value)}`,
+      })),
+    [ordersSeries, revenueSeries],
+  );
+
+  // One short, deterministic insight from real aggregates (never AI-generated).
+  const insight = useMemo<{ icon: keyof typeof Ionicons.glyphMap; text: string }>(() => {
+    if (stats.revenue === 0)
+      return { icon: "information-circle-outline", text: "No sales recorded for the selected period." };
+    if (stats.delta != null && Math.abs(stats.delta) >= 0.05) {
+      const up = stats.delta >= 0;
+      return {
+        icon: up ? "trending-up" : "trending-down",
+        text: `Revenue is ${up ? "up" : "down"} ${(Math.abs(stats.delta) * 100).toFixed(1)}% vs ${PREV_LABEL[period]}.`,
+      };
     }
-    return buckets;
-  }, [orders]);
+    if (stats.top[0]) return { icon: "trophy-outline", text: `${stats.top[0].name} is the top seller ${periodNoun}.` };
+    const best = revenueSeries.reduce((a, b) => (b.value > a.value ? b : a), revenueSeries[0]);
+    if (best && best.value > 0)
+      return { icon: "bar-chart-outline", text: `${best.label} had the highest revenue ${periodNoun}.` };
+    return { icon: "cafe-outline", text: "Sales are steady this period." };
+  }, [stats, period, periodNoun, revenueSeries]);
 
   const cancelStats = useMemo(() => {
     const since = startOf(period).getTime();
@@ -202,11 +320,14 @@ export default function AdminReportsScreen() {
               <Pressable
                 key={p}
                 onPress={() => setPeriod(p)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: period === p }}
+                accessibilityLabel={p === "today" ? "Today" : p === "week" ? "This week" : "This month"}
                 className={`flex-1 items-center rounded-xl py-2.5 ${period === p ? "bg-surface" : ""}`}
                 style={period === p ? shadow.card : undefined}
               >
                 <Text
-                  className={`text-sm font-semibold ${period === p ? "text-textPrimary" : "text-textMuted"}`}
+                  className={`text-sm font-semibold ${period === p ? "text-brandPrimary" : "text-textMuted"}`}
                 >
                   {p === "today" ? "Today" : p === "week" ? "This week" : "This month"}
                 </Text>
@@ -214,8 +335,27 @@ export default function AdminReportsScreen() {
             ))}
           </View>
 
-          {/* Revenue hero */}
-          <View className="rounded-panel bg-brand-900 p-5" style={shadow.floating}>
+          {/* Revenue hero — decorative image, restrained campaign accent */}
+          <View className="overflow-hidden rounded-panel bg-brand-900 p-5" style={shadow.floating}>
+            {!heroFailed ? (
+              <Image
+                source={brandingImages.adminDashboardHero}
+                onError={() => setHeroFailed(true)}
+                contentFit="cover"
+                transition={300}
+                cachePolicy="memory-disk"
+                style={StyleSheet.absoluteFill}
+                accessible={false}
+              />
+            ) : null}
+            <View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { backgroundColor: Colors.accent, opacity: 0.12 }]}
+            />
+            <View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: 0.52 }]}
+            />
             <Text className="text-[11px] font-semibold uppercase tracking-widest text-accent-300">
               Revenue
             </Text>
@@ -240,22 +380,68 @@ export default function AdminReportsScreen() {
             ) : null}
           </View>
 
-          {/* 7-day trend */}
-          <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
-            <Text className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-textMuted">
-              Revenue · last 7 days
-            </Text>
-            <RevenueChart data={chart} />
-          </View>
-
-          {/* Metric cards */}
+          {/* KPI row (same selected period as the hero) */}
           <View className="mt-3 flex-row gap-3">
             <Metric label="Orders" value={String(stats.count)} />
             <Metric label="Avg order" value={peso(stats.avg)} />
             <Metric
-              label={`${ratings.count} ratings`}
+              label={ratings.count ? `${ratings.count} ratings` : "No ratings yet"}
               value={ratings.avg ? `${ratings.avg.toFixed(1)}★` : "—"}
             />
+          </View>
+
+          {/* Revenue trend — area chart, bucketed to match the selected period */}
+          <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
+            <Text className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-textMuted">
+              Revenue · {PERIOD_SUFFIX[period]}
+            </Text>
+            {stats.revenue === 0 ? (
+              <Text className="py-6 text-center text-xs text-textMuted">
+                No revenue in this period yet.
+              </Text>
+            ) : (
+              <AnalyticsChart
+                data={revenuePoints}
+                kind="area"
+                accessibilityLabel={`Revenue chart, ${PERIOD_SUFFIX[period]}. Total ${peso(stats.revenue)}.`}
+              />
+            )}
+          </View>
+
+          {/* Order volume — rounded bars, same period */}
+          <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
+            <Text className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-textMuted">
+              Orders · {PERIOD_SUFFIX[period]}
+            </Text>
+            {ordersInPeriod === 0 ? (
+              <Text className="py-6 text-center text-xs text-textMuted">
+                No orders in this period yet.
+              </Text>
+            ) : (
+              <AnalyticsChart
+                data={ordersPoints}
+                kind="bars"
+                accessibilityLabel={`Orders chart, ${PERIOD_SUFFIX[period]}. ${ordersInPeriod} orders.`}
+              />
+            )}
+          </View>
+
+          {/* Performance insight (deterministic, from real aggregates) */}
+          <View
+            className="mt-3 flex-row items-center gap-3 rounded-card border border-line bg-surface p-4"
+            style={shadow.card}
+          >
+            <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
+              <Ionicons name={insight.icon} size={18} color={Colors.brand} />
+            </View>
+            <Text className="flex-1 text-sm font-medium text-textPrimary">{insight.text}</Text>
+          </View>
+
+          {/* Quick actions */}
+          <View className="mt-3 flex-row gap-3">
+            <QuickAction icon="add-circle-outline" label="Add product" onPress={() => router.push("/admin/product/new")} />
+            <QuickAction icon="cube-outline" label="Inventory" onPress={() => router.push("/admin/inventory")} />
+            <QuickAction icon="megaphone-outline" label="Campaigns" onPress={() => router.push("/admin/campaigns")} />
           </View>
 
           {/* Top sellers */}
@@ -349,6 +535,31 @@ export default function AdminReportsScreen() {
         </ScrollView>
       )}
     </Screen>
+  );
+}
+
+function QuickAction({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      className="flex-1 items-center gap-1.5 rounded-card border border-line bg-surface py-3"
+      style={shadow.card}
+    >
+      <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
+        <Ionicons name={icon} size={18} color={Colors.brand} />
+      </View>
+      <Text className="text-[11px] font-semibold text-textSecondary">{label}</Text>
+    </Pressable>
   );
 }
 

@@ -3,6 +3,7 @@ import { Text, View, type ImageSourcePropType } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { Colors } from "@/constants/theme";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 interface EmptyStateProps {
   /** Optional bundled illustration; falls back to icon/emoji if it fails. */
@@ -24,19 +25,28 @@ export function EmptyState({
   children,
 }: EmptyStateProps) {
   const [imgFailed, setImgFailed] = useState(false);
+  const reduced = useReducedMotion();
   const showImage = !!image && !imgFailed;
 
   return (
     <View className="flex-1 items-center justify-center px-8 py-16">
       {showImage ? (
-        <Image
-          source={image as ImageSourcePropType}
-          style={{ width: 150, height: 150 }}
-          contentFit="contain"
-          transition={200}
-          onError={() => setImgFailed(true)}
-          accessibilityLabel={title}
-        />
+        <View className="items-center justify-center">
+          {/* Live campaign-tinted halo behind the transparent illustration */}
+          <View
+            pointerEvents="none"
+            className="absolute h-44 w-44 rounded-full"
+            style={{ backgroundColor: Colors.accent, opacity: 0.12 }}
+          />
+          <Image
+            source={image as ImageSourcePropType}
+            style={{ width: 152, height: 152 }}
+            contentFit="contain"
+            transition={reduced ? 0 : 200}
+            onError={() => setImgFailed(true)}
+            accessibilityLabel={title}
+          />
+        </View>
       ) : (
         <View className="h-20 w-20 items-center justify-center rounded-full bg-surfaceMuted">
           {icon ? (

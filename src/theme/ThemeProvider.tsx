@@ -19,7 +19,7 @@ export function ThemeProvider({
   children: ReactNode;
 }) {
   const base = scheme === "dark" ? DARK_VARS : LIGHT_VARS;
-  const merged = { ...base, ...seasonalVars(seasonalKey) };
+  const merged = { ...base, ...seasonalVars(seasonalKey, scheme) };
   return (
     <View style={vars(merged)} className="flex-1">
       {children}

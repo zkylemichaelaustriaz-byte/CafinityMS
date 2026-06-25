@@ -18,12 +18,17 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
     containerClassName,
     toggleable,
     secureTextEntry,
+    onFocus,
+    onBlur,
     ...props
   },
   ref,
 ) {
   const [hidden, setHidden] = useState(true);
+  const [focused, setFocused] = useState(false);
   const secure = toggleable ? hidden : secureTextEntry;
+  // Campaign-themed focus ring; falls back to neutral line / danger.
+  const borderClass = error ? "border-danger" : focused ? "border-brandPrimary" : "border-line";
 
   return (
     <View className={containerClassName ?? "mb-4"}>
@@ -35,9 +40,17 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
           ref={ref}
           placeholderTextColor="#B8A99C"
           secureTextEntry={secure}
-          className={`rounded-2xl border bg-surface px-4 py-4 text-base text-textPrimary ${
-            error ? "border-danger" : "border-line"
-          } ${toggleable ? "pr-12" : ""} ${className ?? ""}`}
+          onFocus={(e) => {
+            setFocused(true);
+            onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setFocused(false);
+            onBlur?.(e);
+          }}
+          className={`rounded-2xl border bg-surface px-4 py-4 text-base text-textPrimary ${borderClass} ${
+            toggleable ? "pr-12" : ""
+          } ${className ?? ""}`}
           {...props}
         />
         {toggleable ? (

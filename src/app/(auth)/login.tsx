@@ -64,8 +64,8 @@ export default function LoginScreen() {
 
       {!isSupabaseConfigured ? (
         <View className="mb-5 rounded-2xl border border-accent-300 bg-accent-100 p-4">
-          <Text className="text-sm font-semibold text-brand-800">Supabase not connected</Text>
-          <Text className="mt-1 text-xs text-brand-700">
+          <Text className="text-sm font-semibold text-textPrimary">Supabase not connected</Text>
+          <Text className="mt-1 text-xs text-textSecondary">
             Add your project URL and anon key to a .env file (see README), then restart.
           </Text>
         </View>
@@ -113,7 +113,7 @@ export default function LoginScreen() {
       </Pressable>
 
       {error ? (
-        <View className="mb-4 rounded-xl bg-red-50 p-3">
+        <View className="mb-4 rounded-xl bg-dangerSoft p-3">
           <Text className="text-sm text-danger">{error}</Text>
         </View>
       ) : null}

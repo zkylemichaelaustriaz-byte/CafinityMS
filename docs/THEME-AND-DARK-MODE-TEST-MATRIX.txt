@@ -1,0 +1,62 @@
+CAFINITY — THEME & DARK-MODE TEST MATRIX  (Batch 8)
+===================================================
+One resolved theme = display mode (light/dark/system) + active seasonal campaign.
+Implemented via a single pipeline (no competing systems):
+  - src/theme/vars.ts ........ LIGHT_VARS / DARK_VARS  (CSS-variable values per mode)
+  - src/theme/seasonal.ts .... seasonalVars(key, mode) / seasonalColors(key, mode)
+                               (campaign accents, now mode-aware)
+  - src/theme/ThemeProvider .. merges base(mode) + seasonal(key, mode) via NativeWind vars()
+  - src/constants/theme.ts ... Colors/theme JS proxy merges seasonalColors(key, mode)
+  - src/app/_layout.tsx ...... resolves effective mode (pref or OS), applies + sets StatusBar,
+                               hydrates active campaign on launch + on app foreground.
+The display mode owns surfaces/text/borders; the campaign owns ACCENTS ONLY. Because
+every screen uses semantic tokens (bg-surface / text-textPrimary / border-line /
+bg-brandPrimary / bg-accent ...), changing mode or campaign re-themes the WHOLE app —
+customer, staff, AND admin — with no per-screen recoloring.
+
+WHAT BATCH 8 FIXED (root causes)
+  - Admin stayed brown under a campaign  → admin used fixed `bg-brand-500` for active
+    chips (themed by mode but NOT by campaign). Now `bg-brandPrimary` (campaign-themed).
+  - Dark mode showed white cards / light banners → fixed Tailwind literals that never
+    flip: `bg-white`→bg-surface, `text-stone-*`→text-textMuted/Secondary,
+    `bg-red-50/green-50/amber-50`→bg-dangerSoft/successSoft/warningSoft (new tokens).
+  - Dark accents were near-white soft fills → seasonalVars/Colors now branch on mode
+    (dark = accent-tinted dark soft backgrounds + brightened CTA).
+  - DARK_VARS neutralized (near-black bg, charcoal surfaces, visible borders, warm
+    off-white text) instead of brown-tinted dark.
+
+APPEARANCE BEHAVIOR (Profile → Appearance)
+  Use device / Light / Dark — persisted (cafinity-appearance store). "Use device"
+  follows live OS changes (useColorScheme). Campaign changes apply immediately for the
+  admin (hydrate after save) and on next foreground for everyone (AppState listener).
+  No restart / no auth reset / no cart reset / no navigation reset. StatusBar style
+  follows mode.
+
+TEST MATRIX — check each on LIGHT and DARK (Use device honored)
+  Campaigns: Default, Matcha, Mango, Caramel, Christmas, Valentine, Ube-Taro, Blueberry Rain
+  Priority combos (8.7): Default, Matcha, Mango, Valentine, Blueberry Rain × Light+Dark,
+  then spot-check the rest.
+
+  Surfaces to verify per combo:
+    Customer: Auth, Home, Menu, Product, Cart, Checkout, Orders, Order tracking,
+              Rewards, Profile, Notifications
+    Staff:    Queue, Order details, Account
+    Admin:    Reports, Inventory, Menu mgmt, Users, Manage, Campaigns, Settings,
+              Product Builder, Account
+
+  For each, confirm:
+    [ ] No white card on a dark page (and no dark card on a white page)
+    [ ] Body text readable (warm off-white on dark; espresso on light)
+    [ ] Campaign accent visible on: primary buttons, selected tabs/chips, focus rings,
+        progress bars, hero overlays, badges — NOT flooding whole surfaces
+    [ ] Accent contrast adequate (no unreadable accent text)
+    [ ] StatusBar icons readable
+    [ ] Switching campaign re-tints accents without restart/flicker
+    [ ] Switching Light/Dark re-themes without white flash
+
+KNOWN LIMITATIONS (need on-device tuning)
+  - Default DARK primary-button brown (#B0784E) vs white text is a borderline contrast
+    pair on large/bold text; campaign modes brighten the CTA. Revisit on device.
+  - A few fixed Ionicons hex colors (e.g. #C9A47C chevrons) read as muted brown in dark
+    — visible but not token-driven; can be migrated to Colors.textMuted if desired.
+  - Not device-tested here (no simulator/devices).

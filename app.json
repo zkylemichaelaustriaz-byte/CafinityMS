@@ -4,7 +4,7 @@
     "slug": "Cafinity",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/cafinity-logo.png",
     "scheme": "cafinity",
     "userInterfaceStyle": "light",
     "ios": {
@@ -42,12 +42,12 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#9c6b44",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 120,
+          "backgroundColor": "#2C170A",
+          "image": "./assets/images/cafinity-logo.png",
+          "imageWidth": 200,
           "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "image": "./assets/images/cafinity-logo.png",
+            "imageWidth": 180
           }
         }
       ],
@@ -57,6 +57,12 @@
         {
           "icon": "./assets/images/notification-icon.png",
           "color": "#9c6b44"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cafinity needs photo access so admins can set product images."
         }
       ]
     ],

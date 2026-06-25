@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
@@ -11,8 +12,8 @@ import { getProductBadge } from "@/lib/productBadge";
 import { localProductImage } from "@/lib/productImages";
 import type { MenuProduct } from "@/types/models";
 
-/** Image-led featured card used in horizontal rails. */
-export function ProductCard({ product }: { product: MenuProduct }) {
+/** Image-led featured card used in horizontal rails. Memoized for list perf. */
+export const ProductCard = memo(function ProductCard({ product }: { product: MenuProduct }) {
   const router = useRouter();
   const badge = getProductBadge(product);
   const from = product.variants.length
@@ -55,4 +56,4 @@ export function ProductCard({ product }: { product: MenuProduct }) {
       </View>
     </AnimatedPressable>
   );
-}
+});

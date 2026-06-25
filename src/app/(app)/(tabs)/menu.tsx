@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   FlatList,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   TextInput,
@@ -13,6 +15,7 @@ import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { CampaignRibbon } from "@/components/ui/CampaignRibbon";
 import { ProductGridCard } from "@/components/ui/ProductGridCard";
 import { Screen } from "@/components/ui/Screen";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -26,7 +29,19 @@ import { presetByKey } from "@/lib/campaignPresets";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { useFavorites } from "@/store/favorites";
 import { useRecentSearches } from "@/store/recentSearches";
+import { useSeasonalTheme } from "@/store/seasonalTheme";
 import type { MenuProduct } from "@/types/models";
+
+type SortKey = "recommended" | "newest" | "price_asc" | "price_desc" | "name";
+const SORT_LABEL: Record<SortKey, string> = {
+  recommended: "Recommended",
+  newest: "Newest",
+  price_asc: "Price ↑",
+  price_desc: "Price ↓",
+  name: "Name A–Z",
+};
+const minPrice = (p: MenuProduct) =>
+  p.variants.length ? Math.min(...p.variants.map((v) => v.price)) : 0;
 
 export default function MenuScreen() {
   const router = useRouter();
@@ -40,11 +55,17 @@ export default function MenuScreen() {
 
   const [menu, setMenu] = useState<MenuProduct[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
   const params = useLocalSearchParams<{ collection?: string }>();
   const [collection, setCollection] = useState<string | null>(null);
+  const seasonalKey = useSeasonalTheme((s) => s.activeKey);
+  const seasonalPreset =
+    seasonalKey && seasonalKey !== "default" ? presetByKey(seasonalKey) : null;
+  const listRef = useRef<FlatList<MenuProduct>>(null);
+  const [sort, setSort] = useState<SortKey>("recommended");
 
   useEffect(() => {
     if (params.collection) setCollection(String(params.collection));
@@ -70,6 +91,12 @@ export default function MenuScreen() {
       void load();
     }, [load]),
   );
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
 
   const categories = useMemo(() => {
     const seen: string[] = [];
@@ -100,18 +127,33 @@ export default function MenuScreen() {
     });
   }, [menu, search, activeCategory, favIds, effectiveCollection]);
 
-  // Quick suggestions when the search box is empty: a few new/featured drinks
-  // the user hasn't already searched for.
-  const suggestions = useMemo(() => {
-    const recentLower = new Set(recent.map((t) => t.toLowerCase()));
-    return menu
-      .filter((p) => p.inStock && (p.isNew || p.is_featured))
-      .map((p) => p.name)
-      .filter((name) => !recentLower.has(name.toLowerCase()))
-      .slice(0, 3);
-  }, [menu, recent]);
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    switch (sort) {
+      case "newest":
+        return arr.sort((a, b) => Number(b.isNew) - Number(a.isNew) || a.name.localeCompare(b.name));
+      case "price_asc":
+        return arr.sort((a, b) => minPrice(a) - minPrice(b));
+      case "price_desc":
+        return arr.sort((a, b) => minPrice(b) - minPrice(a));
+      case "name":
+        return arr.sort((a, b) => a.name.localeCompare(b.name));
+      default:
+        return arr; // recommended = the existing category/name order
+    }
+  }, [filtered, sort]);
 
-  const showDiscovery = search.trim() === "" && (recent.length > 0 || suggestions.length > 0);
+  function openSort() {
+    Alert.alert("Sort by", undefined, [
+      ...(["recommended", "newest", "price_asc", "price_desc", "name"] as SortKey[]).map((k) => ({
+        text: `${SORT_LABEL[k]}${k === sort ? "  ✓" : ""}`,
+        onPress: () => setSort(k),
+      })),
+      { text: "Cancel", style: "cancel" as const },
+    ]);
+  }
+
+  const showDiscovery = search.trim() === "" && recent.length > 0;
 
   function commitSearch() {
     // Only remember terms that actually found something.
@@ -171,61 +213,47 @@ export default function MenuScreen() {
         ) : null}
       </View>
 
-      {/* Recent searches + suggestions — single-row, horizontally scrollable */}
+      {/* Campaign discovery ribbon (replaces the old suggestion chips) */}
+      {seasonalPreset ? (
+        <CampaignRibbon
+          preset={seasonalPreset}
+          active={collection === seasonalPreset.key}
+          onSelect={() => {
+            setCollection(seasonalPreset.key);
+            listRef.current?.scrollToOffset({ offset: 0, animated: true });
+          }}
+          onClear={() => setCollection(null)}
+        />
+      ) : null}
+
+      {/* Recent searches — single-row, horizontally scrollable */}
       {showDiscovery ? (
         <View className="mb-3">
-          {recent.length > 0 ? (
-            <>
-              <View className="mb-1.5 flex-row items-center justify-between px-5">
-                <Text className="text-xs font-semibold uppercase tracking-wide text-textMuted">
-                  Recent
-                </Text>
-                <Pressable onPress={() => useRecentSearches.getState().clear()} hitSlop={8}>
-                  <Text className="text-xs font-semibold text-brandPrimary">Clear</Text>
-                </Pressable>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerClassName="gap-2 px-5"
-                className="mb-2"
+          <View className="mb-1.5 flex-row items-center justify-between px-5">
+            <Text className="text-xs font-semibold uppercase tracking-wide text-textMuted">
+              Recent
+            </Text>
+            <Pressable onPress={() => useRecentSearches.getState().clear()} hitSlop={8}>
+              <Text className="text-xs font-semibold text-brandPrimary">Clear</Text>
+            </Pressable>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerClassName="gap-2 px-5"
+          >
+            {recent.map((t) => (
+              <Pressable
+                key={t}
+                onPress={() => setSearch(t)}
+                onLongPress={() => removeRecent(t)}
+                className="h-9 flex-row items-center gap-1.5 rounded-full border border-line bg-surface px-3"
               >
-                {recent.map((t) => (
-                  <Pressable
-                    key={t}
-                    onPress={() => setSearch(t)}
-                    onLongPress={() => removeRecent(t)}
-                    className="h-9 flex-row items-center gap-1.5 rounded-full border border-line bg-surface px-3"
-                  >
-                    <Ionicons name="time-outline" size={13} color={Colors.textMuted} />
-                    <Text className="text-sm text-textSecondary">{t}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
-          {suggestions.length > 0 ? (
-            <>
-              <Text className="mb-1.5 px-5 text-xs font-semibold uppercase tracking-wide text-textMuted">
-                Try one of these
-              </Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerClassName="gap-2 px-5"
-              >
-                {suggestions.map((name) => (
-                  <Pressable
-                    key={name}
-                    onPress={() => setSearch(name)}
-                    className="h-9 justify-center rounded-full border border-accent-300 bg-accent-100 px-3"
-                  >
-                    <Text className="text-sm font-medium text-brand-800">{name}</Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </>
-          ) : null}
+                <Ionicons name="time-outline" size={13} color={Colors.textMuted} />
+                <Text className="text-sm text-textSecondary">{t}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </View>
       ) : null}
 
@@ -257,24 +285,33 @@ export default function MenuScreen() {
         </ScrollView>
       </View>
 
-      {/* Campaign collection banner */}
-      {collection ? (
-        effectiveCollection ? (
-          <View className="mx-5 mb-2 flex-row items-center justify-between rounded-full bg-accent-100 px-4 py-2">
-            <Text className="text-sm font-semibold text-brand-800">
-              Showing the {collectionLabel} collection
-            </Text>
-            <Pressable onPress={() => setCollection(null)} hitSlop={8} accessibilityLabel="Clear collection">
-              <Ionicons name="close-circle" size={18} color={Colors.brand} />
-            </Pressable>
-          </View>
-        ) : (
-          <View className="mx-5 mb-2 rounded-xl bg-surfaceMuted px-4 py-2">
-            <Text className="text-xs text-textSecondary">
-              No {collectionLabel} items available here yet — showing the full menu.
-            </Text>
-          </View>
-        )
+      {/* Collection has no items at this branch (ribbon shows the active state) */}
+      {collection && !effectiveCollection ? (
+        <View className="mx-5 mb-2 rounded-xl bg-surfaceMuted px-4 py-2">
+          <Text className="text-xs text-textSecondary">
+            No {collectionLabel} items available here yet — showing the full menu.
+          </Text>
+        </View>
+      ) : null}
+
+      {/* Result count + sort */}
+      {!loading && !error && menu.length > 0 ? (
+        <View className="mb-1 flex-row items-center justify-between px-5">
+          <Text className="text-xs text-textMuted">
+            {filtered.length} {filtered.length === 1 ? "item" : "items"}
+            {activeCategory !== "All" && !effectiveCollection ? ` · ${activeCategory}` : ""}
+          </Text>
+          <Pressable
+            onPress={openSort}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Sort menu"
+            className="flex-row items-center gap-1"
+          >
+            <Ionicons name="swap-vertical" size={14} color={Colors.brand} />
+            <Text className="text-xs font-semibold text-brandPrimary">{SORT_LABEL[sort]}</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       {/* Grid */}
@@ -295,12 +332,35 @@ export default function MenuScreen() {
         <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
-          data={filtered}
+          ref={listRef}
+          data={sorted}
           keyExtractor={(p) => p.id}
           numColumns={2}
           columnWrapperClassName="gap-3 px-5"
           contentContainerClassName="gap-3 pb-32 pt-1"
           showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brand} />
+          }
+          ListFooterComponent={
+            sorted.length === 0 ? null : (
+              <MenuFooter
+                filtered={
+                  search.trim() !== "" || activeCategory !== "All" || !!effectiveCollection
+                }
+                onClear={() => {
+                  setSearch("");
+                  setActiveCategory("All");
+                  setCollection(null);
+                }}
+                onNotify={() => router.push("/notifications")}
+              />
+            )
+          }
           ListEmptyComponent={
             <EmptyState
               image={getEmptyStateImage(activeCategory === "Favorites" ? "favorites" : "search")}
@@ -340,7 +400,7 @@ export default function MenuScreen() {
             style={shadow.floating}
           >
             <View className="flex-row items-center gap-2">
-              <View className="h-6 min-w-6 items-center justify-center rounded-full bg-white px-1.5">
+              <View className="h-6 min-w-6 items-center justify-center rounded-full bg-surface px-1.5">
                 <Text className="text-xs font-extrabold text-brandPrimary">{count}</Text>
               </View>
               <Text className="text-base font-bold text-white">View cart</Text>
@@ -352,5 +412,56 @@ export default function MenuScreen() {
         </View>
       ) : null}
     </Screen>
+  );
+}
+
+/** End-of-menu footer: marketing message normally, or a clear-filters prompt. */
+function MenuFooter({
+  filtered,
+  onClear,
+  onNotify,
+}: {
+  filtered: boolean;
+  onClear: () => void;
+  onNotify: () => void;
+}) {
+  if (filtered) {
+    return (
+      <View className="items-center px-8 pb-4 pt-8">
+        <Text className="text-center text-sm text-textSecondary">
+          You&apos;ve reached the end of these results.
+        </Text>
+        <Pressable
+          onPress={onClear}
+          className="mt-3 rounded-full border border-line px-5 py-2"
+          accessibilityRole="button"
+        >
+          <Text className="text-sm font-semibold text-brandPrimary">Clear filters</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return (
+    <View className="items-center px-8 pb-6 pt-10">
+      <View className="mb-4 h-px w-16 bg-line" />
+      <View className="flex-row items-center gap-2">
+        <Ionicons name="cafe" size={15} color={Colors.accent} />
+        <Text className="text-xs font-bold uppercase tracking-[2px] text-textPrimary">
+          More good things are brewing
+        </Text>
+      </View>
+      <Text className="mt-2 text-center text-sm text-textSecondary">
+        New drinks, café favorites, and seasonal creations will continue to arrive at Cafinity.
+      </Text>
+      <Pressable
+        onPress={onNotify}
+        className="mt-4 flex-row items-center gap-1.5"
+        accessibilityRole="button"
+        accessibilityLabel="Turn on notifications"
+      >
+        <Ionicons name="notifications-outline" size={14} color={Colors.brand} />
+        <Text className="text-sm font-semibold text-brandPrimary">Turn on notifications</Text>
+      </Pressable>
+    </View>
   );
 }

@@ -13,7 +13,8 @@ export type BundledCampaignPresetKey =
   | "caramel"
   | "christmas"
   | "valentines"
-  | "ube-taro";
+  | "ube-taro"
+  | "blueberry-rain";
 
 const CAMPAIGN_IMAGES: Record<BundledCampaignPresetKey, ImageSourcePropType> = {
   default: require("../../assets/images/campaigns/campaign-default.png"),
@@ -23,6 +24,7 @@ const CAMPAIGN_IMAGES: Record<BundledCampaignPresetKey, ImageSourcePropType> = {
   christmas: require("../../assets/images/campaigns/campaign-christmas.png"),
   valentines: require("../../assets/images/campaigns/campaign-valentines.png"),
   "ube-taro": require("../../assets/images/campaigns/campaign-ube-taro.png"),
+  "blueberry-rain": require("../../assets/images/campaigns/campaign-blueberry-rain.png"),
 };
 
 /** Bundled banner for a preset key, or null if none is bundled. */

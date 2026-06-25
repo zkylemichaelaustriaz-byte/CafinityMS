@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import * as Location from "expo-location";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { Badge } from "@/components/ui/Badge";
+import { BranchWorkload } from "@/components/ui/BranchWorkload";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Header } from "@/components/ui/Header";
 import { Screen } from "@/components/ui/Screen";
@@ -169,7 +170,7 @@ export default function BranchesScreen() {
                       <Badge label={open ? "Open" : "Closed"} tone={open ? "green" : "gray"} />
                     </View>
                     <Text className="mt-1 text-sm text-textSecondary">{item.address}</Text>
-                    <View className="mt-2 flex-row items-center gap-3">
+                    <View className="mt-2 flex-row flex-wrap items-center gap-x-3 gap-y-1.5">
                       <View className="flex-row items-center gap-1">
                         <Ionicons name="navigate" size={13} color={Colors.brand} />
                         <Text className="text-xs font-medium text-brandPrimary">
@@ -182,6 +183,7 @@ export default function BranchesScreen() {
                           {fmtTime(item.opening_time)} – {fmtTime(item.closing_time)}
                         </Text>
                       </View>
+                      {open ? <BranchWorkload branchId={item.id} /> : null}
                     </View>
                   </View>
                   {isSelected ? (

@@ -9,6 +9,7 @@ const PREVIEW_IMAGES: Record<string, ImageSourcePropType> = {
   christmas: require("../../assets/images/campaigns/previews/preset-christmas.png"),
   valentines: require("../../assets/images/campaigns/previews/preset-valentines.png"),
   "ube-taro": require("../../assets/images/campaigns/previews/preset-ube-taro.png"),
+  "blueberry-rain": require("../../assets/images/campaigns/previews/preset-blueberry-rain.png"),
 };
 
 export function getCampaignPreview(presetKey?: string | null): ImageSourcePropType | null {

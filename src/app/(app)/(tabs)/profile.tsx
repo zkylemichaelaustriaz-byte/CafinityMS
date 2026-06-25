@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
-import { Alert, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
-import { Avatar } from "@/components/ui/Avatar";
+import { AppearanceToggle } from "@/components/ui/AppearanceToggle";
+import { AvatarPicker } from "@/components/ui/AvatarPicker";
+import { brandingImages } from "@/lib/brandingImages";
 import { Button } from "@/components/ui/Button";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
 import { getOrders } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import { haptics } from "@/lib/haptics";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { useAppearance, type AppearancePref } from "@/store/appearance";
 import { useAuth } from "@/store/auth";
 import { useBranch } from "@/store/branch";
 
@@ -21,10 +22,9 @@ export default function ProfileScreen() {
   const session = useAuth((s) => s.session);
   const signOut = useAuth((s) => s.signOut);
   const branch = useBranch((s) => s.branch);
-  const appearance = useAppearance((s) => s.preference);
-  const setAppearance = useAppearance((s) => s.setPreference);
 
   const [orderCount, setOrderCount] = useState<number | null>(null);
+  const [coverFailed, setCoverFailed] = useState(false);
 
   useEffect(() => {
     getOrders()
@@ -32,8 +32,6 @@ export default function ProfileScreen() {
       .catch(() => {});
   }, []);
 
-  const initials =
-    `${profile?.first_name?.[0] ?? ""}${profile?.last_name?.[0] ?? ""}`.toUpperCase() || "☕";
   const fullName =
     `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim() || "Cafinity member";
   const email = profile?.email || session?.user.email || "";
@@ -41,7 +39,19 @@ export default function ProfileScreen() {
   function confirmSignOut() {
     Alert.alert("Sign out?", "You'll need to sign in again.", [
       { text: "Cancel", style: "cancel" },
-      { text: "Sign out", style: "destructive", onPress: () => void signOut() },
+      {
+        text: "Sign out",
+        style: "destructive",
+        onPress: async () => {
+          const { networkFailed } = await signOut();
+          if (networkFailed) {
+            Alert.alert(
+              "Signed out on this device",
+              "We couldn't reach the server, so another active session may remain signed in.",
+            );
+          }
+        },
+      },
     ]);
   }
 
@@ -105,9 +115,28 @@ export default function ProfileScreen() {
           <Text className="font-display text-3xl text-textPrimary">Profile</Text>
         </View>
 
-        {/* Identity hero (read-first) */}
-        <View className="mx-5 items-center rounded-panel bg-brand-900 p-6">
-          <Avatar initials={initials} size={80} />
+        {/* Identity hero (read-first) — profile cover with campaign overlay */}
+        <View className="mx-5 items-center overflow-hidden rounded-panel bg-brand-900 p-6">
+          {!coverFailed ? (
+            <Image
+              source={brandingImages.profileCover}
+              onError={() => setCoverFailed(true)}
+              contentFit="cover"
+              transition={300}
+              cachePolicy="memory-disk"
+              style={StyleSheet.absoluteFill}
+              accessible={false}
+            />
+          ) : null}
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: Colors.accent, opacity: 0.16 }]}
+          />
+          <View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: "#000", opacity: 0.45 }]}
+          />
+          <AvatarPicker size={80} />
           <Text className="mt-3 font-display text-xl text-white">{fullName}</Text>
           <Text className="text-sm text-brand-200">{email}</Text>
           {profile ? (
@@ -180,29 +209,8 @@ export default function ProfileScreen() {
         <Text className="mx-5 mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-textMuted">
           Appearance
         </Text>
-        <View className="mx-5 flex-row rounded-2xl bg-surfaceMuted p-1">
-          {(["system", "light", "dark"] as AppearancePref[]).map((opt) => {
-            const active = appearance === opt;
-            return (
-              <Pressable
-                key={opt}
-                onPress={() => {
-                  if (opt !== appearance) haptics.selection();
-                  setAppearance(opt);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={opt === "system" ? "Use device theme" : `${opt} theme`}
-                className={`flex-1 items-center rounded-xl py-2.5 ${active ? "bg-surface" : ""}`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${active ? "text-textPrimary" : "text-textMuted"}`}
-                >
-                  {opt === "system" ? "Use device" : opt === "light" ? "Light" : "Dark"}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View className="mx-5">
+          <AppearanceToggle />
         </View>
 
         {/* Account */}

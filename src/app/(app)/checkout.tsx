@@ -17,10 +17,11 @@ import { getAppSettings, getAvailableVouchers, placeOrder, previewPromo, quoteOr
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { humanizeError } from "@/lib/errors";
 import { formatDateTime, formatEta, lineTotal, peso } from "@/lib/format";
-import { localProductImage } from "@/lib/productImages";
+import { resolveProductImage } from "@/lib/productMedia";
 import { useAuth } from "@/store/auth";
 import { useBranch } from "@/store/branch";
 import { cartSubtotal, useCart } from "@/store/cart";
+import { useSeasonalTheme } from "@/store/seasonalTheme";
 import type { CartLine, OrderQuote, RewardRedemption } from "@/types/models";
 
 /** Client-side preview of a voucher's discount (server re-validates). */
@@ -37,6 +38,7 @@ export default function CheckoutScreen() {
   const router = useRouter();
   const branch = useBranch((s) => s.branch);
   const lines = useCart((s) => s.lines);
+  const activeSeasonalKey = useSeasonalTheme((s) => s.activeKey);
   const cartBranchId = useCart((s) => s.branchId);
   const ensureCheckoutId = useCart((s) => s.ensureCheckoutId);
   const clearCart = useCart((s) => s.clear);
@@ -190,6 +192,13 @@ export default function CheckoutScreen() {
     if (cartBranchId && cartBranchId !== branch.id) {
       setError(
         "Your cart was started at a different branch. Go back to the cart and review it before checking out.",
+      );
+      return;
+    }
+
+    if (lines.some((l) => l.isSeasonal && l.collectionKey !== activeSeasonalKey)) {
+      setError(
+        "A seasonal item in your cart is no longer available under the current campaign. Go back to the cart and remove it to continue.",
       );
       return;
     }
@@ -457,7 +466,7 @@ export default function CheckoutScreen() {
           <Text className="mt-1.5 text-xs text-danger">{promoError}</Text>
         ) : null}
         {appliedPromo ? (
-          <View className="mt-2 flex-row items-center justify-between rounded-xl bg-green-50 px-3 py-2">
+          <View className="mt-2 flex-row items-center justify-between rounded-xl bg-successSoft px-3 py-2">
             <Text className="text-sm font-semibold text-success">{appliedPromo.code} applied</Text>
             <Pressable
               onPress={() => {
@@ -495,7 +504,7 @@ export default function CheckoutScreen() {
         </View>
 
         {method === "GCash" ? (
-          <View className="mt-3 rounded-card border border-blue-200 bg-blue-50 p-4">
+          <View className="mt-3 rounded-card border border-info bg-infoSoft p-4">
             <Text className="text-[11px] font-semibold uppercase tracking-wide text-info">
               Simulated GCash balance · demo only
             </Text>
@@ -583,7 +592,7 @@ export default function CheckoutScreen() {
         <Text className="mt-1 self-end text-[11px] text-textMuted">{notes.length}/300</Text>
 
         {error ? (
-          <View className="mt-5 rounded-xl bg-red-50 p-3">
+          <View className="mt-5 rounded-xl bg-dangerSoft p-3">
             <Text className="text-sm font-medium text-danger">{error}</Text>
           </View>
         ) : null}
@@ -717,8 +726,10 @@ function CheckoutLine({
     <View className={last ? "py-3" : "border-b border-line py-3"}>
       <Pressable onPress={() => setOpen((o) => !o)} className="flex-row">
         <ProductImage
-          source={localProductImage(line.productName)}
-          uri={line.imageUrl}
+          {...resolveProductImage(
+            { name: line.productName, image_url: line.imageUrl },
+            line.presentationKey,
+          )}
           emoji="☕"
           emojiSize={20}
           className="mr-3 h-14 w-14 rounded-xl"

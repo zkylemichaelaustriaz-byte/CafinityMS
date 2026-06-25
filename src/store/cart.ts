@@ -16,6 +16,10 @@ interface CartState {
   replaceLine: (lineId: string, line: CartLine) => void;
   updateQuantity: (lineId: string, quantity: number) => void;
   removeLine: (lineId: string) => void;
+  /** Duplicate a line in place (inserted right after the original). */
+  duplicateLine: (lineId: string) => void;
+  /** Re-insert a line at a position (used to undo a removal). */
+  insertLineAt: (line: CartLine, index: number) => void;
   clear: () => void;
   /** Lazily create (and persist) the checkout token for this cart. */
   ensureCheckoutId: () => string;
@@ -52,6 +56,23 @@ export const useCart = create<CartState>()(
 
       removeLine: (lineId) =>
         set({ lines: get().lines.filter((l) => l.lineId !== lineId) }),
+
+      duplicateLine: (lineId) => {
+        const lines = get().lines;
+        const idx = lines.findIndex((l) => l.lineId === lineId);
+        if (idx < 0) return;
+        const copy: CartLine = {
+          ...lines[idx],
+          lineId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        };
+        set({ lines: [...lines.slice(0, idx + 1), copy, ...lines.slice(idx + 1)] });
+      },
+
+      insertLineAt: (line, index) => {
+        const lines = get().lines;
+        const at = Math.max(0, Math.min(index, lines.length));
+        set({ lines: [...lines.slice(0, at), line, ...lines.slice(at)] });
+      },
 
       clear: () => set({ lines: [], branchId: null, checkoutId: null }),
 

@@ -59,8 +59,9 @@ export async function getBranches(
 // ---- Menu ------------------------------------------------------------------
 
 const PRODUCT_SELECT = `
-  id, category_id, name, description, image_url, is_available, is_featured, created_at, collection_key,
+  id, category_id, name, description, image_url, is_available, is_featured, created_at, collection_key, is_seasonal,
   product_categories ( name, display_order ),
+  product_media ( presentation_key, image_url, is_active ),
   product_variants ( id, product_id, name, price, is_default, is_available, deleted_at ),
   product_customization_link (
     customization_groups (
@@ -159,26 +160,55 @@ function transformProduct(row: any, inv: InventoryMap): MenuProduct {
     isNew,
     lowStock,
     collection_key: row.collection_key ?? null,
+    is_seasonal: row.is_seasonal ?? false,
+    orderable: true, // refined by the caller against the active seasonal campaign
+    media: (row.product_media ?? []).reduce(
+      (acc: Record<string, string>, m: any) => {
+        if (m?.is_active && m?.image_url) acc[m.presentation_key] = m.image_url;
+        return acc;
+      },
+      {} as Record<string, string>,
+    ),
   };
 }
 
+/** Whether a product may be ordered right now given the active seasonal campaign. */
+function isOrderable(p: MenuProduct, activeCollection: string | null): boolean {
+  return !p.is_seasonal || p.collection_key === activeCollection;
+}
+
+/**
+ * Preset key of the active seasonal campaign (server source of truth), or null
+ * when no seasonal campaign is active. Drives both the theme and which seasonal
+ * products customers may see/order. NOT frequency-gated (unlike the ad).
+ */
+export async function getActiveSeasonalCollection(): Promise<string | null> {
+  const { data, error } = await supabase.rpc("active_seasonal_collection");
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
 export async function getMenu(branchId: string): Promise<MenuProduct[]> {
-  const [{ data, error }, inv] = await Promise.all([
+  const [{ data, error }, inv, activeCollection] = await Promise.all([
     supabase
       .from("products")
       .select(PRODUCT_SELECT)
       .is("deleted_at", null)
       .eq("is_available", true),
     inventoryForBranch(branchId),
+    getActiveSeasonalCollection().catch(() => null),
   ]);
   if (error) throw error;
 
   const rows = (data ?? []) as any[];
-  const decorated = rows.map((row) => ({
-    product: transformProduct(row, inv),
-    // PostgREST returns the to-one category as an object at runtime.
-    order: row.product_categories?.display_order ?? 99,
-  }));
+  const decorated = rows
+    .map((row) => ({
+      product: transformProduct(row, inv),
+      // PostgREST returns the to-one category as an object at runtime.
+      order: row.product_categories?.display_order ?? 99,
+    }))
+    // Hide seasonal products whose campaign isn't currently active.
+    .filter((d) => isOrderable(d.product, activeCollection));
   decorated.sort((a, b) =>
     a.order !== b.order
       ? a.order - b.order
@@ -191,13 +221,18 @@ export async function getProduct(
   productId: string,
   branchId: string,
 ): Promise<MenuProduct | null> {
-  const [{ data, error }, inv] = await Promise.all([
+  const [{ data, error }, inv, activeCollection] = await Promise.all([
     supabase.from("products").select(PRODUCT_SELECT).eq("id", productId).single(),
     inventoryForBranch(branchId),
+    getActiveSeasonalCollection().catch(() => null),
   ]);
   if (error) throw error;
   if (!data) return null;
-  return transformProduct(data, inv);
+  // Deep links resolve the product, but flag it un-orderable when its seasonal
+  // campaign is inactive (the screen blocks add-to-cart).
+  const product = transformProduct(data, inv);
+  product.orderable = isOrderable(product, activeCollection);
+  return product;
 }
 
 // ---- Promotions ------------------------------------------------------------
@@ -382,7 +417,7 @@ const ORDER_SELECT = `
   *,
   branches ( name, address ),
   order_items (
-    id, product_name, variant_name, quantity, unit_price, subtotal, item_notes,
+    id, product_name, variant_name, quantity, unit_price, subtotal, item_notes, presentation_key,
     order_item_customization ( id, option_name, quantity, additional_price )
   )
 `;
@@ -467,6 +502,37 @@ export async function confirmCashPayment(orderId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Step an order back one stage (preparing→pending, ready→preparing). */
+export async function revertOrderStatus(orderId: string): Promise<OrderStatus> {
+  const { data, error } = await supabase.rpc("revert_order_status", {
+    p_order_id: orderId,
+  });
+  if (error) throw error;
+  return (data as { status: OrderStatus }).status;
+}
+
+export interface StaffStats {
+  servedToday: number;
+  ordersToday: number;
+  revenueToday: number;
+  activeNow: number;
+  readyNow: number;
+}
+
+/** Today's tallies for a branch (null = all branches). Staff/admin only. */
+export async function getStaffStats(branchId: string | null = null): Promise<StaffStats> {
+  const { data, error } = await supabase.rpc("staff_stats", { p_branch_id: branchId });
+  if (error) throw error;
+  const d = (data ?? {}) as Record<string, unknown>;
+  return {
+    servedToday: Number(d.served_today ?? 0),
+    ordersToday: Number(d.orders_today ?? 0),
+    revenueToday: Number(d.revenue_today ?? 0),
+    activeNow: Number(d.active_now ?? 0),
+    readyNow: Number(d.ready_now ?? 0),
+  };
+}
+
 /** Subscribe to status/payment changes for a single order. Returns unsubscribe. */
 export function subscribeOrder(orderId: string, onChange: (o: Order) => void) {
   const channel = supabase
@@ -492,6 +558,48 @@ export async function getRewards(): Promise<Reward[]> {
     .order("points_cost");
   if (error) throw error;
   return (data ?? []) as Reward[];
+}
+
+export interface Challenge {
+  id: string;
+  code: string;
+  title: string;
+  description: string;
+  type: "orders_count" | "spend_total" | "distinct_products";
+  goal: number;
+  rewardPoints: number;
+  icon: string;
+  progress: number;
+  claimed: boolean;
+}
+
+/** Active loyalty challenges with the caller's server-computed progress. */
+export async function getChallenges(): Promise<Challenge[]> {
+  const { data, error } = await supabase.rpc("get_challenges");
+  if (error) throw error;
+  const rows = (data ?? []) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: String(r.id),
+    code: String(r.code),
+    title: String(r.title),
+    description: String(r.description ?? ""),
+    type: r.type as Challenge["type"],
+    goal: Number(r.goal ?? 0),
+    rewardPoints: Number(r.reward_points ?? 0),
+    icon: String(r.icon ?? "trophy-outline"),
+    progress: Number(r.progress ?? 0),
+    claimed: Boolean(r.claimed),
+  }));
+}
+
+/** Claim a completed challenge; returns the awarded points + new balance. */
+export async function claimChallenge(
+  challengeId: string,
+): Promise<{ awarded: number; balance: number }> {
+  const { data, error } = await supabase.rpc("claim_challenge", { p_challenge_id: challengeId });
+  if (error) throw error;
+  const d = (data ?? {}) as Record<string, unknown>;
+  return { awarded: Number(d.awarded ?? 0), balance: Number(d.balance ?? 0) };
 }
 
 export async function redeemReward(
@@ -578,6 +686,53 @@ export async function updateProfile(
     p_last_name: patch.last_name,
   });
   if (error) throw error;
+}
+
+/** Set or clear the signed-in user's avatar URL (restricted RPC). */
+export async function setMyAvatar(url: string | null): Promise<void> {
+  const { error } = await supabase.rpc("set_my_avatar", { p_url: url });
+  if (error) throw error;
+}
+
+/** Customer display name for an order (staff/admin only; via SECURITY DEFINER RPC). */
+export async function getOrderCustomer(
+  orderId: string,
+): Promise<{ first_name: string; last_name: string } | null> {
+  const { data, error } = await supabase.rpc("staff_order_customer", { p_order_id: orderId });
+  if (error) throw error;
+  return (data as { first_name: string; last_name: string } | null) ?? null;
+}
+
+/** How many active orders are ahead of this one in its branch queue. */
+export async function getOrdersAhead(orderId: string): Promise<number> {
+  const { data, error } = await supabase.rpc("orders_ahead", { p_order_id: orderId });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
+export interface BranchWorkload {
+  active: number;
+  queuedItems: number;
+  level: "quiet" | "moderate" | "busy";
+  etaEnabled: boolean;
+  waitMin: number | null;
+  waitMax: number | null;
+}
+
+/** Live busyness for a branch (aggregate counts only — safe for any user). */
+export async function getBranchWorkload(branchId: string): Promise<BranchWorkload> {
+  const { data, error } = await supabase.rpc("branch_workload", { p_branch_id: branchId });
+  if (error) throw error;
+  const d = (data ?? {}) as Record<string, unknown>;
+  const level = d.level === "busy" || d.level === "moderate" ? d.level : "quiet";
+  return {
+    active: Number(d.active ?? 0),
+    queuedItems: Number(d.queued_items ?? 0),
+    level: level as BranchWorkload["level"],
+    etaEnabled: Boolean(d.eta_enabled),
+    waitMin: d.wait_min == null ? null : Number(d.wait_min),
+    waitMax: d.wait_max == null ? null : Number(d.wait_max),
+  };
 }
 
 // ---- Feedback --------------------------------------------------------------
@@ -938,6 +1093,8 @@ export async function updateStock(
 export interface AdminProduct extends Product {
   category_name: string;
   variants: Variant[];
+  collection_key: string | null;
+  is_seasonal: boolean;
 }
 
 export async function getCategories(): Promise<Category[]> {
@@ -953,7 +1110,7 @@ export async function getAdminProducts(): Promise<AdminProduct[]> {
   const { data, error } = await supabase
     .from("products")
     .select(
-      "id, category_id, name, description, image_url, is_available, is_featured, product_categories ( name ), product_variants ( id, product_id, name, price, is_default, is_available, deleted_at )",
+      "id, category_id, name, description, image_url, is_available, is_featured, collection_key, is_seasonal, product_categories ( name ), product_variants ( id, product_id, name, price, is_default, is_available, deleted_at )",
     )
     .is("deleted_at", null)
     .order("name");
@@ -966,6 +1123,8 @@ export async function getAdminProducts(): Promise<AdminProduct[]> {
     image_url: p.image_url,
     is_available: p.is_available,
     is_featured: p.is_featured,
+    collection_key: p.collection_key ?? null,
+    is_seasonal: p.is_seasonal ?? false,
     category_name: p.product_categories?.name ?? "Other",
     variants: (p.product_variants ?? [])
       .filter((v: any) => v.deleted_at == null)
@@ -1017,14 +1176,160 @@ export async function createProduct(input: NewProductInput): Promise<string> {
   return productId;
 }
 
-export async function updateProduct(
-  id: string,
-  patch: Partial<
-    Pick<Product, "name" | "description" | "is_available" | "is_featured" | "category_id">
-  >,
-): Promise<void> {
+export interface UpdateProductPatch {
+  name?: string;
+  description?: string;
+  category_id?: string | null;
+  is_available?: boolean;
+  is_featured?: boolean;
+  image_url?: string | null;
+  is_seasonal?: boolean;
+  collection_key?: string | null;
+}
+
+export async function updateProduct(id: string, patch: UpdateProductPatch): Promise<void> {
   const { error } = await supabase.from("products").update(patch).eq("id", id);
   if (error) throw error;
+}
+
+export interface FullProductInput {
+  name: string;
+  description: string;
+  category_id: string | null;
+  is_featured: boolean;
+  is_available: boolean;
+  image_url: string | null;
+  is_seasonal: boolean;
+  collection_key: string | null;
+  variants: { name: string; price: number; is_default: boolean }[];
+  groupIds: string[];
+}
+
+/** Create a product with all variants, customization links, and seasonal flags. */
+export async function createProductFull(i: FullProductInput): Promise<string> {
+  const { data, error } = await supabase
+    .from("products")
+    .insert({
+      name: i.name,
+      description: i.description,
+      category_id: i.category_id,
+      is_featured: i.is_featured,
+      is_available: i.is_available,
+      image_url: i.image_url,
+      is_seasonal: i.is_seasonal,
+      collection_key: i.collection_key,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  const productId = data.id as string;
+
+  if (i.variants.length) {
+    const { error: vErr } = await supabase.from("product_variants").insert(
+      i.variants.map((v) => ({
+        product_id: productId,
+        name: v.name,
+        price: v.price,
+        is_default: v.is_default,
+        is_available: true,
+      })),
+    );
+    if (vErr) throw vErr;
+  }
+  if (i.groupIds.length) {
+    const { error: lErr } = await supabase
+      .from("product_customization_link")
+      .insert(i.groupIds.map((gid) => ({ product_id: productId, group_id: gid })));
+    if (lErr) throw lErr;
+  }
+  return productId;
+}
+
+export interface SimpleGroup {
+  id: string;
+  name: string;
+}
+
+export async function getCustomizationGroups(): Promise<SimpleGroup[]> {
+  const { data, error } = await supabase
+    .from("customization_groups")
+    .select("id, name")
+    .order("name");
+  if (error) throw error;
+  return (data ?? []) as SimpleGroup[];
+}
+
+export async function getProductGroupIds(productId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("product_customization_link")
+    .select("group_id")
+    .eq("product_id", productId);
+  if (error) throw error;
+  return (data ?? []).map((r: any) => r.group_id as string);
+}
+
+export type PresentationKey = "default" | "hot" | "iced";
+
+/** Active per-presentation image URLs for a product. */
+export async function getProductMedia(
+  productId: string,
+): Promise<Partial<Record<PresentationKey, string>>> {
+  const { data, error } = await supabase
+    .from("product_media")
+    .select("presentation_key, image_url, is_active")
+    .eq("product_id", productId);
+  if (error) throw error;
+  const out: Partial<Record<PresentationKey, string>> = {};
+  for (const m of data ?? []) {
+    if ((m as any).is_active) out[(m as any).presentation_key as PresentationKey] = (m as any).image_url;
+  }
+  return out;
+}
+
+/** Upsert a product's image for one presentation (admin). */
+export async function setProductMedia(
+  productId: string,
+  key: PresentationKey,
+  imageUrl: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("product_media")
+    .upsert(
+      { product_id: productId, presentation_key: key, image_url: imageUrl, is_active: true, updated_at: new Date().toISOString() },
+      { onConflict: "product_id,presentation_key" },
+    );
+  if (error) throw error;
+}
+
+/** Remove a product's image for one presentation (admin). */
+export async function deleteProductMedia(productId: string, key: PresentationKey): Promise<void> {
+  const { error } = await supabase
+    .from("product_media")
+    .delete()
+    .eq("product_id", productId)
+    .eq("presentation_key", key);
+  if (error) throw error;
+}
+
+/** Replace a product's customization-group links to exactly `groupIds`. */
+export async function setProductGroups(productId: string, groupIds: string[]): Promise<void> {
+  const existing = await getProductGroupIds(productId);
+  const toRemove = existing.filter((g) => !groupIds.includes(g));
+  const toAdd = groupIds.filter((g) => !existing.includes(g));
+  if (toRemove.length) {
+    const { error } = await supabase
+      .from("product_customization_link")
+      .delete()
+      .eq("product_id", productId)
+      .in("group_id", toRemove);
+    if (error) throw error;
+  }
+  if (toAdd.length) {
+    const { error } = await supabase
+      .from("product_customization_link")
+      .insert(toAdd.map((gid) => ({ product_id: productId, group_id: gid })));
+    if (error) throw error;
+  }
 }
 
 export async function softDeleteProduct(id: string): Promise<void> {
@@ -1037,7 +1342,7 @@ export async function softDeleteProduct(id: string): Promise<void> {
 
 export async function updateVariant(
   id: string,
-  patch: Partial<Pick<Variant, "name" | "price" | "is_available">>,
+  patch: Partial<Pick<Variant, "name" | "price" | "is_available" | "is_default">>,
 ): Promise<void> {
   const { error } = await supabase.from("product_variants").update(patch).eq("id", id);
   if (error) throw error;

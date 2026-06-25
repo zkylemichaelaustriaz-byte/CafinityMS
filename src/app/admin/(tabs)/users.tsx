@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
+import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Screen } from "@/components/ui/Screen";
@@ -81,7 +82,7 @@ export default function AdminUsersScreen() {
     <Screen>
       <View className="px-5 pb-2 pt-2">
         <Text className="font-display text-2xl text-textPrimary">Users</Text>
-        <Text className="text-xs text-stone-500">{users.length} accounts · tap to change role</Text>
+        <Text className="text-xs text-textMuted">{users.length} accounts · tap to change role</Text>
       </View>
 
       {loading ? (
@@ -102,19 +103,17 @@ export default function AdminUsersScreen() {
             return (
               <Pressable
                 onPress={() => pickRole(item)}
-                className="flex-row items-center rounded-2xl border border-brand-100 bg-white p-3"
+                className="flex-row items-center rounded-2xl border border-brand-100 bg-surface p-3"
               >
-                <View className="h-11 w-11 items-center justify-center rounded-full bg-brand-100">
-                  <Text className="text-sm font-extrabold text-brand-700">{initials}</Text>
-                </View>
+                <Avatar uri={item.avatar_url} initials={initials} size={44} />
                 <View className="ml-3 flex-1">
                   <Text className="text-sm font-bold text-espresso">
                     {fullName}
                     {item.id === myId ? (
-                      <Text className="text-xs font-normal text-stone-400"> (you)</Text>
+                      <Text className="text-xs font-normal text-textMuted"> (you)</Text>
                     ) : null}
                   </Text>
-                  <Text className="text-xs text-stone-400" numberOfLines={1}>
+                  <Text className="text-xs text-textMuted" numberOfLines={1}>
                     {item.email}
                   </Text>
                 </View>

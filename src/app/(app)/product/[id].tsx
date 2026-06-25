@@ -12,10 +12,15 @@ import {
 } from "@/components/ui/KeyboardAwareScrollView";
 import { Colors } from "@/constants/theme";
 import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
-import { getProduct } from "@/lib/api";
+import { getMenu, getProduct } from "@/lib/api";
 import { categoryEmoji, peso } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
-import { localProductImage } from "@/lib/productImages";
+import { pairingFor } from "@/lib/productPairings";
+import {
+  presentationFromOptionNames,
+  resolveProductImage,
+  type Presentation,
+} from "@/lib/productMedia";
 import { useBranch } from "@/store/branch";
 import { useCart } from "@/store/cart";
 import type {
@@ -42,14 +47,30 @@ export default function ProductScreen() {
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState("");
+  const [paired, setPaired] = useState<MenuProduct | null>(null);
+  const [pairedAdded, setPairedAdded] = useState(false);
 
   useEffect(() => {
     void (async () => {
       if (!branch || !id) return;
       setLoading(true);
+      setPaired(null);
+      setPairedAdded(false);
       try {
         const p = await getProduct(id, branch.id);
         setProduct(p);
+        // Resolve a "pairs well with" suggestion from the live menu (price/image/id).
+        const pairName = pairingFor(p?.name);
+        if (p && pairName) {
+          void getMenu(branch.id)
+            .then((menu) => {
+              const match = menu.find(
+                (m) => m.name.trim().toLowerCase() === pairName && m.id !== p.id && m.orderable,
+              );
+              setPaired(match ?? null);
+            })
+            .catch(() => setPaired(null));
+        }
         const editing = edit ? useCart.getState().lines.find((l) => l.lineId === edit) : undefined;
         if (p && editing) {
           // Editing an existing cart line: restore its exact configuration.
@@ -105,11 +126,21 @@ export default function ProductScreen() {
     return out;
   }, [product, selections]);
 
+  // Presentation (default/hot/iced) follows the selected Temperature option.
+  const presentation: Presentation = useMemo(() => {
+    const temp = product?.groups.find((g) => g.name === "Temperature");
+    if (!temp) return "default";
+    return presentationFromOptionNames(
+      (selections[temp.id] ?? []).map((oid) => temp.options.find((o) => o.id === oid)?.name),
+    );
+  }, [product, selections]);
+
   const unitPrice =
     (variant?.price ?? 0) + selectedOptions.reduce((s, o) => s + o.additionalPrice, 0);
   const total = unitPrice * quantity;
 
   function toggle(group: CustomizationGroup, optionId: string) {
+    haptics.selection();
     setSelections((prev) => {
       const cur = prev[group.id] ?? [];
       if (group.selection_type === "single") {
@@ -124,6 +155,7 @@ export default function ProductScreen() {
 
   function addToCart() {
     if (!product || !variant || !branch) return;
+    if (!product.orderable) return;
     if (editLine) {
       // Edit-in-place: keep the same lineId/position in the cart.
       replaceLine(editLine.lineId, {
@@ -137,6 +169,9 @@ export default function ProductScreen() {
         quantity,
         selectedOptions,
         notes: notes.trim(),
+        collectionKey: product.collection_key ?? null,
+        isSeasonal: product.is_seasonal,
+        presentationKey: presentation,
       });
     } else {
       addLine(
@@ -151,12 +186,44 @@ export default function ProductScreen() {
           quantity,
           selectedOptions,
           notes: notes.trim(),
+          collectionKey: product.collection_key ?? null,
+          isSeasonal: product.is_seasonal,
+          presentationKey: presentation,
         },
         branch.id,
       );
     }
     haptics.success();
     router.back();
+  }
+
+  function addPaired() {
+    if (!paired || !branch) return;
+    const v =
+      paired.variants.find((x) => x.is_default && x.is_available) ??
+      paired.variants.find((x) => x.is_available) ??
+      paired.variants[0];
+    if (!v) return;
+    addLine(
+      {
+        lineId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        productId: paired.id,
+        productName: paired.name,
+        imageUrl: paired.image_url,
+        variantId: v.id,
+        variantName: v.name,
+        basePrice: v.price,
+        quantity: 1,
+        selectedOptions: [],
+        notes: "",
+        collectionKey: paired.collection_key ?? null,
+        isSeasonal: paired.is_seasonal,
+        presentationKey: "default",
+      },
+      branch.id,
+    );
+    haptics.success();
+    setPairedAdded(true);
   }
 
   if (!branch) {
@@ -184,23 +251,39 @@ export default function ProductScreen() {
   return (
     <View className="flex-1 bg-background">
       <KeyboardAwareScrollView ref={scrollRef} contentContainerClassName="pb-40">
-        {/* Hero */}
+        {/* Hero — switches with Hot/Iced (expo-image crossfade, stable aspect) */}
         <View>
           <ProductImage
-            source={localProductImage(product.name)}
-            uri={product.image_url}
+            {...resolveProductImage(
+              { name: product.name, image_url: product.image_url, media: product.media },
+              presentation,
+            )}
             emoji={categoryEmoji(product.category_name)}
             emojiSize={76}
             className="h-72 w-full"
-            accessibilityLabel={product.name}
+            accessibilityLabel={`${product.name}${presentation !== "default" ? `, ${presentation}` : ""}`}
           />
+          {/* Bottom scrim separates the hero from the title below */}
+          <View pointerEvents="none" className="absolute bottom-0 left-0 right-0 h-16 bg-black/15" />
+          {/* Hot/Iced label once the customer selects a temperature */}
+          {presentation !== "default" ? (
+            <View className="absolute bottom-3 left-4 flex-row items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5">
+              <Ionicons
+                name={presentation === "iced" ? "snow-outline" : "flame-outline"}
+                size={13}
+                color="#fff"
+              />
+              <Text className="text-xs font-bold uppercase text-white">{presentation}</Text>
+            </View>
+          ) : null}
           <Pressable
             onPress={() => router.back()}
             accessibilityLabel="Go back"
             style={{ top: insets.top + 8 }}
             className="absolute left-4 h-10 w-10 items-center justify-center rounded-full bg-white/90"
           >
-            <Ionicons name="chevron-back" size={24} color={Colors.espresso} />
+            {/* Fixed dark arrow — the circle is always white, even in dark mode */}
+            <Ionicons name="chevron-back" size={24} color="#231711" />
           </Pressable>
         </View>
 
@@ -209,6 +292,15 @@ export default function ProductScreen() {
           <Text className="mt-1.5 text-sm leading-5 text-textSecondary">
             {product.description}
           </Text>
+
+          {!product.orderable ? (
+            <View className="mt-4 flex-row items-center gap-2 rounded-2xl border border-warning bg-warningSoft px-4 py-3">
+              <Ionicons name="snow-outline" size={18} color={Colors.warning} />
+              <Text className="flex-1 text-xs text-warning">
+                This is a seasonal item and isn’t available under the current campaign.
+              </Text>
+            </View>
+          ) : null}
 
           {/* Sizes */}
           {product.variants.length > 0 ? (
@@ -222,7 +314,7 @@ export default function ProductScreen() {
                       key={v.id}
                       disabled={!v.is_available}
                       onPress={() => setVariantId(v.id)}
-                      className={`flex-row items-center justify-between rounded-2xl border px-4 py-3.5 ${
+                      className={`flex-row items-center justify-between rounded-2xl border px-4 py-3 ${
                         active ? "border-brandPrimary bg-accent-100" : "border-line bg-surface"
                       } ${v.is_available ? "" : "opacity-40"}`}
                     >
@@ -255,6 +347,14 @@ export default function ProductScreen() {
                 <Text className="text-xs text-textMuted">
                   {g.selection_type === "single" ? "Choose 1" : "Choose any"}
                 </Text>
+                {(selections[g.id]?.length ?? 0) > 0 ? (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={Colors.brand}
+                    style={{ marginLeft: "auto" }}
+                  />
+                ) : null}
               </View>
               <View className="overflow-hidden rounded-2xl border border-line bg-surface">
                 {g.options.map((o, idx) => {
@@ -271,7 +371,7 @@ export default function ProductScreen() {
                     <Pressable
                       key={o.id}
                       onPress={() => toggle(g, o.id)}
-                      className={`flex-row items-center justify-between px-4 py-3.5 ${
+                      className={`flex-row items-center justify-between px-4 py-3 ${
                         idx > 0 ? "border-t border-line" : ""
                       } ${sel ? "bg-accent-100" : ""}`}
                     >
@@ -290,6 +390,58 @@ export default function ProductScreen() {
               </View>
             </View>
           ))}
+
+          {/* Pairs well with */}
+          {paired ? (
+            <View className="mt-6">
+              <Text className="mb-2 font-heading text-base text-textPrimary">Pairs well with</Text>
+              <View className="flex-row items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+                <Pressable
+                  onPress={() => router.push(`/product/${paired.id}`)}
+                  className="flex-1 flex-row items-center gap-3"
+                  accessibilityLabel={`View ${paired.name}`}
+                >
+                  <ProductImage
+                    {...resolveProductImage({
+                      name: paired.name,
+                      image_url: paired.image_url,
+                      media: paired.media,
+                    })}
+                    emoji={categoryEmoji(paired.category_name)}
+                    emojiSize={28}
+                    className="h-14 w-14 rounded-xl"
+                  />
+                  <View className="flex-1">
+                    <Text className="font-heading text-sm text-textPrimary" numberOfLines={1}>
+                      {paired.name}
+                    </Text>
+                    <Text className="mt-0.5 text-xs text-textSecondary">
+                      from {peso(Math.min(...paired.variants.map((v) => v.price)))}
+                    </Text>
+                  </View>
+                </Pressable>
+                <Pressable
+                  onPress={addPaired}
+                  disabled={pairedAdded}
+                  accessibilityLabel={`Add ${paired.name} to cart`}
+                  className={`flex-row items-center gap-1.5 rounded-full px-3.5 py-2 ${
+                    pairedAdded ? "bg-successSoft" : "bg-accent-100"
+                  }`}
+                >
+                  <Ionicons
+                    name={pairedAdded ? "checkmark" : "add"}
+                    size={16}
+                    color={pairedAdded ? Colors.success : Colors.brand}
+                  />
+                  <Text
+                    className={`text-xs font-bold ${pairedAdded ? "text-success" : "text-brandPrimary"}`}
+                  >
+                    {pairedAdded ? "Added" : "Add"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
 
           {/* Notes */}
           <View className="mt-6">
@@ -319,19 +471,33 @@ export default function ProductScreen() {
           keyboardVisible ? "hidden" : ""
         }`}
       >
+        {/* Live summary of the current selection */}
+        {product.orderable && variant ? (
+          <Text className="mb-2 text-xs text-textMuted" numberOfLines={1}>
+            {[variant.name, ...selectedOptions.map((o) => o.optionName)]
+              .filter(Boolean)
+              .join("  ·  ")}
+          </Text>
+        ) : null}
         <View className="flex-row items-center gap-3">
           <QuantityStepper value={quantity} onChange={setQuantity} />
           <AnimatedPressable
             onPress={addToCart}
-            disabled={!variant?.is_available}
+            disabled={!variant?.is_available || !product.orderable}
             className={`h-14 flex-1 flex-row items-center justify-center gap-2 rounded-2xl bg-brandPrimary ${
-              !variant?.is_available ? "opacity-50" : ""
+              !variant?.is_available || !product.orderable ? "opacity-50" : ""
             }`}
           >
             <Text className="text-base font-bold text-white">
-              {editLine ? "Update cart" : "Add to cart"}
+              {!product.orderable
+                ? "Unavailable"
+                : editLine
+                  ? "Update cart"
+                  : "Add to cart"}
             </Text>
-            <Text className="font-display text-base text-white">· {peso(total)}</Text>
+            {product.orderable ? (
+              <Text className="font-display text-base text-white">· {peso(total)}</Text>
+            ) : null}
           </AnimatedPressable>
         </View>
       </View>

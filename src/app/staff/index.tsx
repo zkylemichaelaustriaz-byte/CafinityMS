@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   Text,
   TextInput,
   View,
@@ -23,13 +24,27 @@ import {
   confirmCashPayment,
   getActiveOrders,
   getBranches,
+  revertOrderStatus,
   subscribeAllOrders,
 } from "@/lib/api";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { humanizeError } from "@/lib/errors";
-import { formatEta, statusLabel } from "@/lib/format";
+import { formatEta, pickupOrRef, statusLabel } from "@/lib/format";
+import { haptics } from "@/lib/haptics";
 import { mapOrderError } from "@/lib/orderErrors";
+import { useStaffPrefs } from "@/store/staffPrefs";
 import type { Branch, Order, OrderStatus } from "@/types/models";
+
+type SortMode = "fifo" | "lifo";
+type FilterMode = "all" | "pending" | "preparing" | "ready" | "unpaid";
+
+const FILTERS: { key: FilterMode; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "pending", label: "New" },
+  { key: "preparing", label: "Preparing" },
+  { key: "ready", label: "Ready" },
+  { key: "unpaid", label: "Unpaid" },
+];
 
 function nextAction(
   status: OrderStatus,
@@ -81,11 +96,27 @@ export default function StaffQueueScreen() {
   const [query, setQuery] = useState("");
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(Date.now());
+  const [sort, setSort] = useState<SortMode>("fifo");
+  const [filter, setFilter] = useState<FilterMode>("all");
+  const [undo, setUndo] = useState<{ orderId: string; label: string } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevIds = useRef<Set<string>>(new Set());
+  const seeded = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      setOrders(await getActiveOrders());
+      const data = await getActiveOrders();
+      // Vibrate when a brand-new order lands (skip the very first sync).
+      const ids = new Set(data.map((o) => o.id));
+      if (seeded.current) {
+        const hasNew = data.some((o) => o.status === "pending" && !prevIds.current.has(o.id));
+        if (hasNew && useStaffPrefs.getState().hapticOnNewOrder) haptics.medium();
+      } else {
+        seeded.current = true;
+      }
+      prevIds.current = ids;
+      setOrders(data);
       setLastSync(Date.now());
     } catch (e) {
       setError(humanizeError(e, "Could not load the queue."));
@@ -93,6 +124,12 @@ export default function StaffQueueScreen() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -122,11 +159,36 @@ export default function StaffQueueScreen() {
   async function advance(order: Order) {
     setBusyId(order.id);
     try {
-      await advanceOrderStatus(order.id);
+      const newStatus = await advanceOrderStatus(order.id);
       await load();
+      // Offer a brief undo for reversible steps (not for completion).
+      if (newStatus === "preparing" || newStatus === "ready") {
+        setUndo({ orderId: order.id, label: statusLabel(newStatus) });
+        if (undoTimer.current) clearTimeout(undoTimer.current);
+        undoTimer.current = setTimeout(() => setUndo(null), 5000);
+      }
     } catch (e) {
       const { title, message } = mapOrderError(e);
       await load(); // refresh stale actions if another staffer moved it
+      Alert.alert(title, message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleUndo() {
+    if (!undo) return;
+    const id = undo.orderId;
+    setUndo(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setBusyId(id);
+    try {
+      await revertOrderStatus(id);
+      haptics.light();
+      await load();
+    } catch (e) {
+      const { title, message } = mapOrderError(e);
+      await load();
       Alert.alert(title, message);
     } finally {
       setBusyId(null);
@@ -153,26 +215,52 @@ export default function StaffQueueScreen() {
   );
 
   const visible = useMemo(() => {
+    let list = inBranch;
+    if (filter === "unpaid") list = list.filter(cashUnpaidFor);
+    else if (filter !== "all") list = list.filter((o) => o.status === filter);
+
     const q = query.trim().toLowerCase();
-    if (!q) return inBranch;
-    return inBranch.filter((o) => (o.order_number ?? "").toLowerCase().includes(q));
-  }, [inBranch, query]);
+    if (q) list = list.filter((o) => (o.order_number ?? "").toLowerCase().includes(q));
+
+    return [...list].sort((a, b) => {
+      const ta = new Date(a.created_at).getTime();
+      const tb = new Date(b.created_at).getTime();
+      return sort === "fifo" ? ta - tb : tb - ta;
+    });
+  }, [inBranch, query, filter, sort]);
 
   const metrics = useMemo(() => {
     let pending = 0;
     let preparing = 0;
     let ready = 0;
+    let unpaid = 0;
     let oldest = 0;
     for (const o of inBranch) {
       if (o.status === "pending") pending += 1;
       else if (o.status === "preparing") preparing += 1;
       else if (o.status === "ready") ready += 1;
+      if (cashUnpaidFor(o)) unpaid += 1;
       if (o.status === "pending" || o.status === "preparing") {
         oldest = Math.max(oldest, waitMinutes(o.created_at, now));
       }
     }
-    return { pending, preparing, ready, oldest };
+    return { pending, preparing, ready, unpaid, oldest, total: inBranch.length };
   }, [inBranch, now]);
+
+  function filterCount(key: FilterMode): number {
+    switch (key) {
+      case "pending":
+        return metrics.pending;
+      case "preparing":
+        return metrics.preparing;
+      case "ready":
+        return metrics.ready;
+      case "unpaid":
+        return metrics.unpaid;
+      default:
+        return metrics.total;
+    }
+  }
 
   return (
     <Screen>
@@ -257,6 +345,53 @@ export default function StaffQueueScreen() {
         ) : null}
       </View>
 
+      {/* Filters + sort */}
+      <View className="flex-row items-center gap-2 px-5 py-2">
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerClassName="gap-2 pr-2"
+          className="flex-1"
+        >
+          {FILTERS.map((f) => {
+            const on = filter === f.key;
+            const count = filterCount(f.key);
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => setFilter(f.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                className={`h-8 flex-row items-center gap-1.5 rounded-full px-3 ${
+                  on ? "bg-brandPrimary" : "border border-line bg-surface"
+                }`}
+              >
+                <Text
+                  className={`text-xs font-semibold ${on ? "text-white" : "text-textSecondary"}`}
+                >
+                  {f.label}
+                </Text>
+                {count > 0 ? (
+                  <Text className={`text-xs font-bold ${on ? "text-white/90" : "text-textMuted"}`}>
+                    {count}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <Pressable
+          onPress={() => setSort((s) => (s === "fifo" ? "lifo" : "fifo"))}
+          accessibilityLabel={sort === "fifo" ? "Oldest first" : "Newest first"}
+          className="h-8 flex-row items-center gap-1 rounded-full border border-line bg-surface px-3"
+        >
+          <Ionicons name="swap-vertical" size={14} color={Colors.brand} />
+          <Text className="text-xs font-semibold text-textSecondary">
+            {sort === "fifo" ? "Oldest" : "Newest"}
+          </Text>
+        </Pressable>
+      </View>
+
       {loading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color={Colors.brand} />
@@ -293,8 +428,19 @@ export default function StaffQueueScreen() {
             const wait = waitMinutes(item.created_at, now);
             const itemCount = (item.order_items ?? []).reduce((n, i) => n + i.quantity, 0);
             const urgency = item.status === "ready" ? "normal" : urgencyOf(wait);
+            // Past its promised ready time while still preparing = running late.
+            const delayed =
+              item.status === "preparing" &&
+              !!item.estimated_ready_at &&
+              now > new Date(item.estimated_ready_at).getTime();
+            // Live prep timer (since the order entered "preparing").
+            const prepMins =
+              item.status === "preparing" && item.eta_calculated_at
+                ? waitMinutes(item.eta_calculated_at, now)
+                : null;
+            const showOverdue = urgency === "overdue" || delayed;
             const accent =
-              urgency === "overdue"
+              showOverdue
                 ? { borderLeftWidth: 4, borderLeftColor: Colors.danger }
                 : urgency === "waiting"
                   ? { borderLeftWidth: 4, borderLeftColor: Colors.warning }
@@ -313,14 +459,24 @@ export default function StaffQueueScreen() {
               >
                 <View className="flex-row items-center justify-between">
                   <View className="flex-row items-center gap-2">
-                    <Text className="font-display text-lg text-textPrimary">
-                      {item.order_number}
-                    </Text>
-                    {urgency === "overdue" ? (
+                    <View>
+                      <Text className="font-display text-lg text-textPrimary">
+                        Pickup {pickupOrRef(item)}
+                      </Text>
+                      {item.order_number ? (
+                        <Text className="text-[10px] text-textMuted">{item.order_number}</Text>
+                      ) : null}
+                    </View>
+                    {showOverdue ? (
                       <Ionicons name="alert-circle" size={16} color={Colors.danger} />
                     ) : null}
                   </View>
                   <View className="flex-row items-center gap-1.5">
+                    {delayed ? (
+                      <View className="rounded-full bg-dangerSoft px-2 py-0.5">
+                        <Text className="text-[10px] font-bold text-danger">Delayed</Text>
+                      </View>
+                    ) : null}
                     <View
                       className={`rounded-full px-2 py-0.5 ${
                         cashUnpaidFor(item) ? "bg-amber-100" : "bg-green-100"
@@ -328,7 +484,7 @@ export default function StaffQueueScreen() {
                     >
                       <Text
                         className={`text-[10px] font-bold ${
-                          cashUnpaidFor(item) ? "text-amber-800" : "text-green-700"
+                          cashUnpaidFor(item) ? "text-warning" : "text-success"
                         }`}
                       >
                         {cashUnpaidFor(item)
@@ -345,6 +501,12 @@ export default function StaffQueueScreen() {
                 <Text className="mt-0.5 text-xs text-textMuted">
                   {item.branches?.name ?? ""} · {itemCount} item{itemCount === 1 ? "" : "s"} ·{" "}
                   <Text className={waitClass}>{wait} min ago</Text>
+                  {prepMins != null ? (
+                    <Text className={delayed ? "font-bold text-danger" : "text-textMuted"}>
+                      {"  · ⏱ prep "}
+                      {prepMins}m
+                    </Text>
+                  ) : null}
                   {item.payment_method === "Cash" && item.payment_status !== "paid"
                     ? "  · 💵 unpaid"
                     : ""}
@@ -367,8 +529,18 @@ export default function StaffQueueScreen() {
                   ) : null}
                 </View>
 
+                {/* Special-instructions flag so allergies/requests are visible up front */}
+                {item.notes ? (
+                  <View className="mt-2 flex-row items-center gap-1.5 rounded-lg border border-warning bg-warningSoft px-2.5 py-1.5">
+                    <Ionicons name="alert-circle" size={13} color={Colors.warning} />
+                    <Text className="flex-1 text-xs font-medium text-textPrimary" numberOfLines={2}>
+                      {item.notes}
+                    </Text>
+                  </View>
+                ) : null}
+
                 {item.status === "pending" && cashUnpaidFor(item) ? (
-                  <Text className="mt-2 text-xs font-medium text-amber-700">
+                  <Text className="mt-2 text-xs font-medium text-warning">
                     {needsVerifyFor(item)
                       ? "Verify the PWD/Senior ID, then confirm payment."
                       : "Confirm cash payment before preparing."}
@@ -392,7 +564,7 @@ export default function StaffQueueScreen() {
                         <AnimatedPressable
                           onPress={() => confirmCash(item)}
                           disabled={busyId === item.id}
-                          className="flex-row items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-3.5 py-2.5"
+                          className="flex-row items-center gap-1.5 rounded-xl border border-green-300 bg-successSoft px-3.5 py-2.5"
                         >
                           {busyId === item.id ? (
                             <ActivityIndicator color={Colors.success} size="small" />
@@ -430,6 +602,19 @@ export default function StaffQueueScreen() {
           }}
         />
       )}
+
+      {undo ? (
+        <View pointerEvents="box-none" className="absolute bottom-5 left-0 right-0">
+          <View className="mx-4 flex-row items-center justify-between rounded-2xl bg-textPrimary px-4 py-3">
+            <Text className="flex-1 pr-3 text-sm font-medium text-background" numberOfLines={1}>
+              Moved to {undo.label}
+            </Text>
+            <Pressable onPress={handleUndo} hitSlop={8} accessibilityLabel="Undo status change">
+              <Text className="text-sm font-bold text-brandPrimary">Undo</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
     </Screen>
   );
 }

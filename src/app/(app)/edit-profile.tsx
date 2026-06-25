@@ -58,7 +58,7 @@ export default function EditProfileScreen() {
       <Header title="Edit profile" />
       <KeyboardAwareScrollView ref={scrollRef} contentContainerClassName="p-5 pb-40">
         <View className="items-center pb-6">
-          <Avatar initials={initials} size={88} />
+          <Avatar uri={profile?.avatar_url} initials={initials} size={88} />
           <Field
             label="Email"
             value={email}

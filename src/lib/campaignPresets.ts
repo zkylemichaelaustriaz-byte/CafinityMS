@@ -25,6 +25,7 @@ export const CAMPAIGN_PRESETS: CampaignPreset[] = [
   { key: "christmas", name: "Christmas", title: "Merry Cafinity", subtitle: "Cozy holiday flavors are back.", badge: "Holiday", cta: "See the menu", accent: "#B23B3B", bg: "#E9F1E7", emoji: "🎄" },
   { key: "valentines", name: "Valentine's", title: "Share the love", subtitle: "Sweet treats meant for two.", badge: "Limited", cta: "Treat yourself", accent: "#C2506E", bg: "#FBE7EE", emoji: "💝" },
   { key: "ube-taro", name: "Ube & Taro", title: "Ube & Taro Collection", subtitle: "Creamy, dreamy, naturally delicious.", badge: "New · Seasonal", cta: "Explore the collection", accent: "#77508F", bg: "#EEE6F3", emoji: "💜" },
+  { key: "blueberry-rain", name: "Blueberry Rain", title: "Blueberry Rain", subtitle: "Cool sips for rainy days.", badge: "Seasonal", cta: "Explore the collection", accent: "#4C5FD5", bg: "#E7EAF7", emoji: "🫐" },
   { key: "default", name: "Cafinity Favorites", title: "Cafinity Favorites", subtitle: "Your everyday favorites, ready when you are.", badge: "Featured", cta: "Browse the menu", accent: "#5A3019", bg: "#FBF7F1", emoji: "☕" },
 ];
 

@@ -29,6 +29,10 @@ export const PRODUCT_IMAGES: Record<string, number> = {
   "choco strawberry mocha": require("../../assets/images/products/choco-strawberry-mocha.png"),
   "ube latte": require("../../assets/images/products/ube-latte.png"),
   "taro milk tea": require("../../assets/images/products/taro-milk-tea.png"),
+  // Blueberry Rain collection (phase 16)
+  "blueberry cloud latte": require("../../assets/images/products/blueberry-cloud-latte.png"),
+  "butterfly pea blueberry fizz": require("../../assets/images/products/blueberry-rain-fizz.png"),
+  "blueberry cheesecake": require("../../assets/images/products/blueberry-cheesecake.png"),
 };
 
 /** Returns a local image module for a product name, if one has been added. */

@@ -16,7 +16,15 @@ export interface ChartBucket {
  * width via a non-uniform viewBox; no measuring needed. Bars are normalised to
  * the largest bucket so an empty period still renders a flat baseline.
  */
-export function RevenueChart({ data, height = 120 }: { data: ChartBucket[]; height?: number }) {
+export function RevenueChart({
+  data,
+  height = 120,
+  accessibilityLabel,
+}: {
+  data: ChartBucket[];
+  height?: number;
+  accessibilityLabel?: string;
+}) {
   const max = Math.max(1, ...data.map((d) => d.value));
   const VBW = 100;
   const VBH = 56;
@@ -25,7 +33,7 @@ export function RevenueChart({ data, height = 120 }: { data: ChartBucket[]; heig
   const bw = (VBW - gap * (n - 1)) / n;
 
   return (
-    <View>
+    <View accessible accessibilityLabel={accessibilityLabel}>
       <Svg width="100%" height={height} viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none">
         {data.map((d, i) => {
           const h = Math.max(1.5, (d.value / max) * VBH);

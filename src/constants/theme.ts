@@ -36,46 +36,46 @@ export interface ThemeColors {
 }
 
 export const lightTheme: ThemeColors = {
-  background: "#FBF7F1", // warm ivory
+  background: "#FAF9F7", // warm white
   surface: "#FFFFFF",
-  surfaceMuted: "#F2EADF",
+  surfaceMuted: "#F3F0EC", // soft neutral
   surfaceElevated: "#FFFFFF",
-  textPrimary: "#231711", // espresso ink
-  textSecondary: "#6B5A4E",
-  textMuted: "#8A7A6B", // darkened for AA contrast on ivory
-  brandPrimary: "#5A3019", // deep espresso — primary CTA / dark panels
+  textPrimary: "#241913", // espresso ink
+  textSecondary: "#756C66",
+  textMuted: "#8C827A",
+  brandPrimary: "#572A15", // deep espresso — primary CTA / dark panels
   brandSecondary: "#9A6A43", // latte / mocha
   secondary: "#5E7A5A", // sage green — fresh secondary
   secondarySoft: "#E6EDE3",
-  accent: "#E0832B", // amber — energy, progress, highlights
+  accent: "#E88725", // amber — energy, progress, highlights
   accentSoft: "#F8E4C8",
-  border: "#EADED0",
+  border: "#EAE5DF", // light neutral border
   success: "#2F855A",
   warning: "#D97E27",
   danger: "#C0392B",
   info: "#2B6CB0",
   disabled: "#D6C9BA",
   overlay: "rgba(30,18,12,0.55)",
-  skeleton: "#ECE2D5",
+  skeleton: "#ECE7E1",
   onBrand: "#FFFFFF",
   onAccent: "#3A2410",
 };
 
 export const darkTheme: ThemeColors = {
-  background: "#160F08",
-  surface: "#201710",
-  surfaceMuted: "#2A1F14",
-  surfaceElevated: "#2E2216",
-  textPrimary: "#F6EEE2",
-  textSecondary: "#C9B7A4",
-  textMuted: "#8C7A68",
-  brandPrimary: "#C98B5C",
+  background: "#100F0D",
+  surface: "#211E1B",
+  surfaceMuted: "#2C2824",
+  surfaceElevated: "#34302B",
+  textPrimary: "#F5EFE7",
+  textSecondary: "#BDB3A8",
+  textMuted: "#8E857C",
+  brandPrimary: "#B0784E",
   brandSecondary: "#A86B43",
   secondary: "#7FA078",
   secondarySoft: "#27341F",
   accent: "#E8A24A",
   accentSoft: "#3A2A18",
-  border: "#3A2C1D",
+  border: "#48423C",
   success: "#48BB78",
   warning: "#E0922F",
   danger: "#E05A4B",
@@ -108,7 +108,7 @@ export function activeScheme(): "light" | "dark" {
 function activeTheme(): ThemeColors {
   const base = _scheme === "dark" ? darkTheme : lightTheme;
   // seasonal.ts only type-imports from this module, so there is no runtime cycle.
-  const override = seasonalColors(_seasonalKey);
+  const override = seasonalColors(_seasonalKey, _scheme);
   return override ? { ...base, ...override } : base;
 }
 

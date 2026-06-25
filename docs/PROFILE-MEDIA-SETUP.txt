@@ -1,0 +1,50 @@
+CAFINITY — PROFILE MEDIA SETUP  (Batch 9)
+=========================================
+Profile photos for Customer, Staff, and Admin. Self-service upload via the
+device gallery; stored in Supabase Storage with owner-only RLS.
+
+DATABASE  (migration: supabase/phase19_profile_avatars.sql — run AFTER phase18)
+  - users.avatar_url text (nullable). getProfile selects *, so it is auto-loaded.
+  - RPC set_my_avatar(p_url text) SECURITY DEFINER — sets/clears the signed-in
+    user's own avatar (direct user-table updates remain blocked by phase3).
+  - Run order: … → phase18_product_images_storage → phase19_profile_avatars.
+
+STORAGE  (bucket: avatars)
+  - Public read, 5 MB file-size limit, MIME allowlist [image/jpeg,png,webp].
+  - Path: avatars/{user-id}/avatar-{uuid}.jpg
+  - Policies on storage.objects:
+      read   : anyone (bucket is public)
+      insert : authenticated AND first path segment = auth.uid()
+      update : same owner check
+      delete : same owner check
+  - Admins do NOT get unrestricted avatar editing — owner-only by design.
+  - The app uploads with the signed-in user's session; the service-role key is
+    NEVER shipped to the client.
+
+CLIENT
+  - src/lib/avatarUpload.ts: uploadAvatarImage(uid, uri) resizes 512x512 +
+    compresses (JPEG 0.7) then uploads; removeAvatarByUrl(url) best-effort cleanup
+    of the previous file (parsed from the public URL).
+  - src/components/ui/AvatarPicker.tsx: tappable avatar that runs the full flow —
+    pick (square crop via allowsEditing+aspect[1,1]) → upload → set_my_avatar →
+    refreshProfile → delete old file. Loading spinner badge + friendly error alert.
+    Falls back: uploaded photo → bundled default-avatar.png → initials.
+  - Deps reused (already installed): expo-image-picker, expo-image-manipulator,
+    base64-arraybuffer, expo-image.
+
+WHERE IT APPEARS  (all read from the one avatar_url, refresh without restart)
+  - Customer Profile hero ...... AvatarPicker (editable)
+  - Customer Edit profile ...... Avatar (read-only display)
+  - Staff Account hero ......... AvatarPicker (editable) + profile-cover.png hero
+  - Admin Manage hero .......... AvatarPicker (editable) + admin-dashboard-hero.png hero
+  - Admin Users list ........... Avatar (read-only, per row)
+
+SAFE REPLACEMENT
+  Upload new file → confirm DB update (set_my_avatar) → refresh profile → THEN
+  best-effort delete the previous file. A failed DB update never leaves the user
+  without a working image (old URL stays until the new one is confirmed).
+
+NOT DEVICE-TESTED HERE
+  Gallery permission prompt, real upload/replace/remove, RLS denial for another
+  user's folder, oversized/invalid file rejection — verify on device after running
+  phase19 and creating the avatars bucket.

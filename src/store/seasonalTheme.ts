@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getActiveCampaign } from "@/lib/api";
+import { getActiveSeasonalCollection } from "@/lib/api";
 
 interface SeasonalThemeState {
   /** Preset key of the server's active campaign — shared by everyone. */
@@ -28,8 +28,9 @@ export const useSeasonalTheme = create<SeasonalThemeState>()(
       previewKey: null,
       hydrate: async () => {
         try {
-          const c = await getActiveCampaign();
-          set({ activeKey: c?.is_active ? (c.preset_key ?? null) : null });
+          // Active seasonal campaign's preset_key (server source of truth, NOT
+          // frequency-gated). null when no seasonal campaign is active.
+          set({ activeKey: await getActiveSeasonalCollection() });
         } catch {
           // Keep the last known palette on transient failures.
         }
