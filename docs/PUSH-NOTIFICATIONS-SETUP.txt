@@ -1,0 +1,65 @@
+CAFINITY — NOTIFICATIONS: WHAT WORKS NOW vs REMOTE PUSH SETUP
+============================================================
+
+There are two layers. Layer A works today in Expo Go. Layer B (remote push)
+requires a development build and a small backend function — it is NOT possible
+in Expo Go (Expo Go cannot register Android push tokens on SDK 53+).
+
+------------------------------------------------------------
+LAYER A — IN-APP + LOCAL NOTIFICATIONS  (working, Expo Go OK)
+------------------------------------------------------------
+- In-app notification center: app/(app)/notifications.tsx, fed by the
+  `notifications` table via a single realtime channel (components/
+  NotificationProvider.tsx -> store/notifications.ts). Unread bell in the Home
+  header. Deep-links: order_* -> /order/[id]; reward/voucher -> /rewards.
+- Server trigger `notify_order_change` (supabase/phase11_notifications.sql)
+  inserts a row on each order status change (received / preparing / ready /
+  completed / cancelled / payment_confirmed / refund / discount verified|
+  rejected), gated by the user's `order_updates` preference. One row per
+  transition (no duplicates).
+- Local OS notification on the order screen when the live status changes
+  (lib/notify.ts -> notifyLocal). It ONLY fires if the OS permission is already
+  granted; it never prompts silently.
+- Permission is requested ONLY from an explicit tap on the notifications screen
+  ("Enable notifications"). States handled: granted / denied (can re-ask) /
+  blocked (-> Open settings) / undetermined.
+- Preferences (notification_preferences table): order_updates, promotions,
+  rewards, voucher_expiry. Marketing (promotions) is independent of order-
+  critical (order_updates); disabling promotions never disables in-app order
+  tracking.
+
+------------------------------------------------------------
+LAYER B — REMOTE PUSH  (requires a development build)
+------------------------------------------------------------
+Scaffold already present: `device_tokens` table (phase11) for storing Expo push
+tokens. NOT wired to a registration call (so Expo Go never errors).
+
+To enable remote push later:
+
+1. Create a development build (not Expo Go):
+     npx eas build --profile development --platform android
+     npx eas build --profile development --platform ios
+   (eas.json already has a `development` profile.)
+
+2. Register the device token on login (dev build only). In a provider:
+     import * as Notifications from "expo-notifications";
+     import * as Device from "expo-device";        // expo install expo-device
+     const projectId = Constants.expoConfig.extra.eas.projectId;
+     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+   Upsert it into `device_tokens` (user_id default auth.uid(), token unique).
+   Deactivate/remove the row on sign-out. Never log the raw token.
+
+3. Send pushes from the server. Add a Supabase Edge Function (or extend
+   notify_order_change via pg_net) that POSTs to https://exp.host/--/api/v2/
+   push/send with the user's active tokens whenever a notification row is
+   inserted. Respect notification_preferences server-side.
+
+4. app.json already includes the expo-notifications plugin with
+   notification-icon.png. For Android production push, add the FCM credentials
+   in the EAS project (eas credentials).
+
+NOTES
+- Do not expose push tokens in user-visible logs.
+- Refresh/replace tokens when they change; deactivate on logout.
+- Marketing pushes must respect the `promotions` preference.
+- Test on a PHYSICAL device — push tokens are not issued on simulators.

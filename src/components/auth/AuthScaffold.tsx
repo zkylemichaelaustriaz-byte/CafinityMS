@@ -10,7 +10,9 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { CampaignAwareHero } from "@/components/ui/CampaignAwareHero";
+import { CoffeeCup } from "@/components/brand/CoffeeCup";
 import { Wordmark } from "@/components/brand/Wordmark";
+import { Colors } from "@/constants/theme";
 import { brandingImages } from "@/lib/brandingImages";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 
@@ -73,15 +75,23 @@ export function AuthScaffold({
             contentClassName="px-6 pb-7 pt-12"
           >
             <Wordmark size="lg" onDark />
-            <Text className="mt-2 text-sm text-brand-100">{tagline}</Text>
-            <View className="mt-4 flex-row flex-wrap gap-2">
-              {BENEFITS.map((b) => (
-                <View
-                  key={b.label}
-                  className="flex-row items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"
-                >
-                  <Ionicons name={b.icon} size={13} color="#fff" />
-                  <Text className="text-xs font-semibold text-white">{b.label}</Text>
+            {/* Always light over the dark hero photo + scrim (brand-100 is dark in
+                dark mode, which made this invisible). */}
+            <Text
+              className="mt-2 text-sm font-medium text-white/90"
+              style={{ textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 4 }}
+            >
+              {tagline}
+            </Text>
+            {/* One informational strip (not three competing buttons) */}
+            <View className="mt-4 flex-row items-center rounded-2xl bg-white/10 px-1 py-2">
+              {BENEFITS.map((b, i) => (
+                <View key={b.label} className="flex-row flex-1 items-center">
+                  {i > 0 ? <View className="h-4 w-px bg-white/20" /> : null}
+                  <View className="flex-1 flex-row items-center justify-center gap-1.5">
+                    <Ionicons name={b.icon} size={13} color="#fff" />
+                    <Text className="text-[11px] font-semibold text-white">{b.label}</Text>
+                  </View>
                 </View>
               ))}
             </View>
@@ -94,12 +104,17 @@ export function AuthScaffold({
           >
             {children}
 
-            {/* Flexible spacer + subtle brand footer absorb tall-device surplus */}
-            <View className="min-h-[16px] flex-1" />
-            <View className="mt-6 flex-row items-center justify-center gap-1.5 pt-2">
-              <Ionicons name="cafe" size={12} color="#A8927F" />
+            {/* Flexible spacer carries a very low-contrast brand motif so the
+                surplus on tall screens feels intentional, not empty. */}
+            <View className="min-h-[16px] flex-1 items-center justify-center">
+              <View pointerEvents="none" style={{ opacity: 0.06 }}>
+                <CoffeeCup size={120} tint={Colors.brand} />
+              </View>
+            </View>
+            <View className="mt-4 flex-row items-center justify-center gap-1.5 pt-2">
+              <Ionicons name="cafe" size={12} color={Colors.textMuted} />
               <Text className="text-[11px] text-textMuted">
-                Order ahead · Earn rewards · Track your order live
+                Coffee made easier, from order to pickup.
               </Text>
             </View>
           </Animated.View>

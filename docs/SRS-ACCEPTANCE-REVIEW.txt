@@ -1,0 +1,147 @@
+CAFINITY — SRS ACCEPTANCE REVIEW (Batch 16)
+===========================================
+Date: 2026-06-26
+Excluded by request: Requirement 12 (Authentication Recovery / forgot-password /
+session-recovery redesign) — NOT in scope, NOT changed beyond what already shipped.
+
+Validation at sign-off: tsc 0 errors, eslint 0, expo-doctor 18/18, expo export
+iOS + Android both succeed. NOT device-tested (no simulator / EAS in this env);
+items needing a device are listed at the end.
+
+=====================================================================
+PART A — SRS TEST CASE MAPPING
+=====================================================================
+
+TC-01 BRANCH SELECTION ........................................ PASS (code)
+- Permission requested ONLY on explicit tap (branches.tsx); states handled:
+  undetermined/prompt, granted, denied (re-ask), blocked (Open settings),
+  unavailable (device location off / failed → Try again).
+- Granted → nearest ACTIVE branch recommended ("Nearest" badge, distance sort).
+- Denied/blocked → manual selection still works (list always loads).
+- Missing branch coords → no crash (distance chip + badge gated on distanceKm).
+- Selecting a branch refreshes inventory (cart re-validates; menu re-queries).
+- Active order's branch cannot change (order is immutable post-placement).
+Files: app/(app)/branches.tsx, components/ui/BranchSelector.tsx, lib/branchHours.ts
+
+TC-02 OUT-OF-STOCK ITEM ....................................... PASS (code)
+- Variant/product availability per branch (branch_inventory, is_available,
+  closed-by-default). Sold-out variants disabled on product detail.
+- Branch switch is NON-DESTRUCTIVE (rebaseBranch) → cart flags items not
+  available at the new branch (red border + per-item message), blocks checkout,
+  Edit/Remove offered, no silent deletion. Also catches stock-depletion races.
+- Server place_order is the final inventory gate (rejects insufficient stock).
+LIMIT: per-CUSTOMIZATION-OPTION availability is NOT modelled in the schema, so it
+is not enforced (would need a new column) — documented, not fabricated.
+Files: app/(app)/cart.tsx, store/cart.ts, app/(app)/branches.tsx
+
+TC-03 DRINK CUSTOMIZATION ..................................... PASS (code)
+- Selections appear in cart + order summary + receipt; add-on prices update
+  totals live (product detail summary + sticky bar).
+- Required single-choice groups enforced (highlight + scroll to the empty group).
+- Historical orders preserve chosen customizations via order_item_customization
+  snapshots (and price snapshots — historical totals don't move with menu).
+Files: app/(app)/product/[id].tsx, lib/limits.ts
+
+TC-04 PAYMENT SUCCESS ......................................... PASS (code)
+- One payment attempt → one order: button disabled while placing + idempotent
+  place_order (checkout_request_id).
+- Order linked to selected branch; confirmation screen (order/[id]?new=1) with
+  pickup number, branch, ETA, payment status, Track.
+- Pickup ticket/QR generated (active orders); staff FIFO queue receives it.
+- Payment + order statuses separate and correct.
+Files: app/(app)/checkout.tsx, app/(app)/order/[id].tsx, components/ui/PickupQR.tsx
+
+TC-05 REWARD POINTS .......................................... PASS (code)
+- Points use existing rules (loyalty_points_per_peso); awarded ONCE at COMPLETION
+  (advance_order_status), not at placement; pending → earned → reversed lifecycle.
+- Balance + activity update; refresh/retry cannot double-award (server-guarded).
+Files: supabase/phase5_loyalty_cash.sql (unchanged), rewards.tsx
+
+TC-06 INSUFFICIENT FUNDS ...................................... PASS (code, simulated)
+- Simulated GCash balance < total → "Transaction Failed … cart kept"; no order
+  created, no points, retry / change method available.
+Files: app/(app)/checkout.tsx
+
+TC-07 NETWORK TIMEOUT ......................................... PASS (code)
+- Double-submit impossible (disabled while placing + idempotency).
+- Offline/timeout on submit → "Verifying your payment" state (NOT a failure):
+  "Check payment status" re-calls place_order with the SAME checkout_request_id
+  (returns existing order if created, else creates once) → no duplicate.
+- Cart preserved; reconnection allows verification.
+Files: app/(app)/checkout.tsx, lib/errors.ts, store/network.ts
+
+TC-08 INPUT LIMITS ........................................... PASS (code)
+- Quantity capped at MAX_ITEM_QUANTITY (20, shared constant = server check);
+  plus button disables at cap + "Maximum of 20 per item." message; value can't
+  be set-then-rejected at checkout.
+LIMIT: multi-choice MAX-selection not enforced (no max column in schema) — not
+fabricated. Required (single) enforced.
+Files: lib/limits.ts, components/ui/QuantityStepper.tsx, app/(app)/product/[id].tsx
+
+ADDITIONAL TESTS
+- Notification permission denial → app fine; contextual opt-in + Open settings;
+  order notifications deep-link to /order, reward/voucher to /rewards; one row
+  per transition (no dup). [app/(app)/notifications.tsx, lib/notify.ts]
+- Feedback submit + dup prevention (unique order_id,user_id; on-conflict update);
+  tags; admin feedback report (avg/dist/tags/by-branch/filters).
+  [phase26, app/admin/feedback.tsx]
+- Staff FIFO: getActiveOrders = created_at ASC; unpaid cash blocked from Start;
+  temporary sort labelled; refresh stable. [app/staff/index.tsx]
+- Low-stock alert generation (dashboard summary + inventory page). [lib/stockStatus.ts]
+- Sales period filters + breakdowns + prev-period delta. [app/admin/reports.tsx]
+- Route protection: RoleGate on app/admin/_layout.tsx + app/staff/_layout.tsx;
+  server RLS on orders/feedback/inventory/rewards/notifications; deep links can't
+  bypass (layout gate runs before children).
+- Offline cart preservation + checkout blocked offline. [store/network.ts]
+- Safe areas via Screen + insets; keyboard via KeyboardAwareScrollView.
+
+=====================================================================
+PART B — COMPLETION REPORT
+=====================================================================
+
+1. NEW DATABASE MIGRATIONS (run in numeric order after existing phase2…22):
+   phase23_branch_workload.sql   — branch_workload() RPC (aggregate, RLS-safe)
+   phase24_staff_ops.sql         — revert_order_status() + staff_stats() RPCs
+   phase25_loyalty_challenges.sql— challenges + user_challenge_claims + RPCs
+   phase26_feedback_tags.sql     — feedback.tags + tags-aware submit_feedback()
+   NO existing/applied migration was edited. RLS reviewed; no policy weakened.
+   (Earlier feature phases also added phase15–22; all idempotent.)
+
+2. NEW REUSABLE COMPONENTS / LIBS:
+   components: BranchSelector (Field/PickerSheet), CollapsibleSection, ActionSheet,
+     OfflineBanner, NetworkProvider, PickupQR, BranchWorkload.
+   lib: branchHours, stockStatus, orderStatus, limits, feedbackTags, salesReport,
+     receiptHtml, productPairings, network(store).
+   theme tokens: textDisabled/Inverse/Link, borderStrong, surfaceSelected/Disabled,
+     onSuccess/Warning/Danger/Info (+ retuned dark/light values, WCAG-verified).
+
+3. NEW SCREENS / ROUTES:
+   admin/feedback.tsx, admin/reports.tsx, (app)/receipt/[id].tsx (earlier).
+
+4. NEW DEPENDENCIES (all Expo-Go-safe, expo install):
+   react-native-qrcode-svg, expo-print, expo-sharing, @react-native-community/netinfo.
+   (react-native-svg already present.)
+
+5. PRESERVED BUSINESS LOGIC (unchanged): pricing/VAT/statutory/tips/loyalty/ETA/
+   cancellation/refund/payment/queue/QR/reorder. No schema or pricing recalculation.
+
+6. KNOWN LIMITS / DEFERRED (documented, not fabricated):
+   - Per-customization-option availability: no schema column (TC-02 note).
+   - Multi-choice MAX selections: no schema column (TC-08 note).
+   - Per-product feedback: feedback is per-order; would need a new table.
+   - Remote push (Layer B): needs a dev build — see PUSH-NOTIFICATIONS-SETUP.txt.
+   - Staff "sound on new order": haptic only (audio asset/dev build deferred).
+   - Admin challenge CRUD: challenges are seed-managed for now.
+
+7. MANUAL / DEVICE TESTING REQUIRED (no simulator/EAS here):
+   - Dark mode visual pass on a device across all screens.
+   - Branch bottom-sheet + ActionSheet + receipt PDF share on real iOS/Android.
+   - Location permission flow (grant/deny/block/services-off) on hardware.
+   - Pickup QR scannability; narrow widths 320–360px; iPad/tablet admin layout.
+   - Run phase23–26 SQL in Supabase before exercising those features.
+
+8. CONFIRMATIONS:
+   - Authentication recovery (Req 12) was EXCLUDED and unchanged.
+   - No already-applied migration was overwritten; new ones are sequential.
+   - No hardcoded business data introduced (branches/products/prices/orders/
+     rewards all from Supabase; tags/limits are config constants, not data).

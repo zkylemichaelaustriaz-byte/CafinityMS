@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { Badge } from "@/components/ui/Badge";
+import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ProductImage } from "@/components/ui/ProductImage";
 import { Screen } from "@/components/ui/Screen";
@@ -26,6 +27,7 @@ type StockFilter = "all" | "low" | "out" | "hidden";
 export default function AdminInventoryScreen() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchSheet, setBranchSheet] = useState(false);
   const [rows, setRows] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -191,31 +193,19 @@ export default function AdminInventoryScreen() {
 
       {/* Branch selector */}
       <View className="px-5 py-1">
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={branches}
-          keyExtractor={(b) => b.id}
-          contentContainerClassName="gap-2"
-          renderItem={({ item }) => {
-            const active = branchId === item.id;
-            return (
-              <Pressable
-                onPress={() => setBranchId(item.id)}
-                className={`rounded-full px-4 py-2 ${
-                  active ? "bg-brandPrimary" : "bg-surface border border-brand-100"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}
-                >
-                  {item.name}
-                </Text>
-              </Pressable>
-            );
-          }}
+        <BranchSelectorField
+          branch={branches.find((b) => b.id === branchId) ?? null}
+          label="Branch"
+          onPress={() => setBranchSheet(true)}
         />
       </View>
+      <BranchPickerSheet
+        visible={branchSheet}
+        branches={branches}
+        selectedId={branchId}
+        onSelect={(id) => id && setBranchId(id)}
+        onClose={() => setBranchSheet(false)}
+      />
 
       {/* Search */}
       <View className="mx-5 mt-2 flex-row items-center rounded-2xl border border-line bg-surface px-3">
@@ -224,7 +214,7 @@ export default function AdminInventoryScreen() {
           value={query}
           onChangeText={setQuery}
           placeholder="Search product or size"
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           autoCorrect={false}
           className="flex-1 px-2 py-3 text-base text-textPrimary"
         />
@@ -293,7 +283,7 @@ export default function AdminInventoryScreen() {
             return (
               <View
                 className={`overflow-hidden rounded-2xl border bg-surface ${
-                  g.outC > 0 ? "border-red-200" : g.lowC > 0 ? "border-amber-200" : "border-brand-100"
+                  g.outC > 0 ? "border-danger" : g.lowC > 0 ? "border-warning" : "border-line"
                 }`}
               >
                 <Pressable

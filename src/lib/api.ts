@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { distanceKm } from "@/lib/format";
+import { stockStatus } from "@/lib/stockStatus";
 import type {
   AdminSettings,
   AppNotification,
@@ -741,26 +742,29 @@ export async function submitFeedback(
   orderId: string,
   rating: number,
   comment: string,
+  tags: string[] = [],
 ): Promise<void> {
   // Server validates ownership + that the order is completed.
   const { error } = await supabase.rpc("submit_feedback", {
     p_order_id: orderId,
     p_rating: rating,
     p_comment: comment,
+    p_tags: tags,
   });
   if (error) throw error;
 }
 
 export async function getFeedbackForOrder(
   orderId: string,
-): Promise<{ rating: number; comment: string } | null> {
+): Promise<{ rating: number; comment: string; tags: string[] } | null> {
   const { data, error } = await supabase
     .from("feedback")
-    .select("rating, comment")
+    .select("rating, comment, tags")
     .eq("order_id", orderId)
     .maybeSingle();
   if (error) throw error;
-  return data ?? null;
+  if (!data) return null;
+  return { rating: data.rating, comment: data.comment, tags: (data.tags ?? []) as string[] };
 }
 
 // ---- Favorites -------------------------------------------------------------
@@ -872,6 +876,28 @@ export async function getActiveCampaign(): Promise<Campaign | null> {
   return (data as Campaign | null) ?? null;
 }
 
+/**
+ * The current season's ad WITHOUT frequency gating — the top-priority active,
+ * in-window campaign. Used so the seasonal ad always appears on login regardless
+ * of past impressions / frequency_rule. (campaigns is readable by all.)
+ */
+export async function getActiveSeasonalAd(): Promise<Campaign | null> {
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("*")
+    .eq("is_active", true)
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  const now = Date.now();
+  const list = ((data ?? []) as Campaign[]).filter(
+    (c) =>
+      (!c.starts_at || new Date(c.starts_at).getTime() <= now) &&
+      (!c.ends_at || new Date(c.ends_at).getTime() >= now),
+  );
+  return list[0] ?? null;
+}
+
 /** Record that the modal was shown; returns the impression id for follow-ups. */
 export async function recordCampaignView(campaignId: string): Promise<string | null> {
   const { data, error } = await supabase
@@ -973,8 +999,18 @@ export interface ReportOrder {
   total_amount: number;
   status: OrderStatus;
   payment_status: PaymentStatus;
+  payment_method: string;
   created_at: string;
   branch_id: string;
+  subtotal: number;
+  tip_amount: number;
+  promo_discount: number;
+  loyalty_reward_discount: number;
+  statutory_discount: number;
+  discount_amount: number;
+  vat_amount: number;
+  refund_status: string | null;
+  refunded_amount: number | null;
   order_items: { product_name: string; quantity: number; subtotal: number }[];
 }
 
@@ -982,7 +1018,7 @@ export async function getOrdersSince(fromISO: string): Promise<ReportOrder[]> {
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, total_amount, status, payment_status, created_at, branch_id, order_items ( product_name, quantity, subtotal )",
+      "id, total_amount, status, payment_status, payment_method, created_at, branch_id, subtotal, tip_amount, promo_discount, loyalty_reward_discount, statutory_discount, discount_amount, vat_amount, refund_status, refunded_amount, order_items ( product_name, quantity, subtotal )",
     )
     .gte("created_at", fromISO)
     .order("created_at", { ascending: false });
@@ -1025,16 +1061,31 @@ export interface FeedbackRow {
   rating: number;
   comment: string;
   created_at: string;
+  tags: string[];
+  branch_id: string | null;
+  branch_name: string;
+  order_number: string | null;
 }
 
-export async function getFeedbackList(limit = 20): Promise<FeedbackRow[]> {
+export async function getFeedbackList(limit = 100): Promise<FeedbackRow[]> {
   const { data, error } = await supabase
     .from("feedback")
-    .select("id, rating, comment, created_at")
+    .select(
+      "id, rating, comment, created_at, tags, orders ( branch_id, order_number, branches ( name ) )",
+    )
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as FeedbackRow[];
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    rating: r.rating,
+    comment: r.comment ?? "",
+    created_at: r.created_at,
+    tags: (r.tags ?? []) as string[],
+    branch_id: r.orders?.branch_id ?? null,
+    branch_name: r.orders?.branches?.name ?? "",
+    order_number: r.orders?.order_number ?? null,
+  }));
 }
 
 // ---- Inventory -------------------------------------------------------------
@@ -1074,6 +1125,66 @@ export async function getInventory(branchId: string): Promise<InventoryRow[]> {
         a.product_name.localeCompare(b.product_name) ||
         a.price - b.price,
     );
+}
+
+export interface LowStockItem {
+  product_name: string;
+  variant_name: string;
+  branch_id: string;
+  branch_name: string;
+  stock: number;
+  threshold: number;
+  status: "low" | "critical" | "out";
+}
+
+export interface LowStockSummary {
+  low: number;
+  critical: number;
+  out: number;
+  affectedBranches: number;
+  items: LowStockItem[];
+}
+
+/** Cross-branch low/critical/out-of-stock rollup for the admin dashboard. */
+export async function getLowStockSummary(): Promise<LowStockSummary> {
+  const { data, error } = await supabase
+    .from("branch_inventory")
+    .select(
+      "stock_quantity, low_stock_threshold, is_available, branch_id, branches ( name ), product_variants ( name, products ( name ) )",
+    );
+  if (error) throw error;
+
+  const items: LowStockItem[] = [];
+  const branchSet = new Set<string>();
+  let low = 0;
+  let critical = 0;
+  let out = 0;
+
+  for (const r of (data ?? []) as any[]) {
+    const stock = Number(r.stock_quantity ?? 0);
+    const threshold = Number(r.low_stock_threshold ?? 0);
+    const s = stockStatus(stock, threshold, r.is_available !== false);
+    if (s === "healthy") continue;
+    if (s === "low") low += 1;
+    else if (s === "critical") critical += 1;
+    else out += 1;
+    branchSet.add(r.branch_id);
+    items.push({
+      product_name: r.product_variants?.products?.name ?? "",
+      variant_name: r.product_variants?.name ?? "",
+      branch_id: r.branch_id,
+      branch_name: r.branches?.name ?? "",
+      stock,
+      threshold,
+      status: s,
+    });
+  }
+
+  // Worst first (out → critical → low), then lowest stock.
+  const rank = { out: 0, critical: 1, low: 2 } as const;
+  items.sort((a, b) => rank[a.status] - rank[b.status] || a.stock - b.stock);
+
+  return { low, critical, out, affectedBranches: branchSet.size, items };
 }
 
 export async function updateStock(
@@ -1374,12 +1485,30 @@ export async function deleteVariant(id: string): Promise<void> {
 // ---- Users -----------------------------------------------------------------
 
 export async function getAllUsers(): Promise<Profile[]> {
-  const { data, error } = await supabase
+  // Prefer the branch join; fall back to a plain select if phase27 (users.branch_id)
+  // hasn't been run yet, so the screen never hard-errors.
+  let res = await supabase
     .from("users")
-    .select("*")
+    .select("*, branches ( name )")
     .order("created_at", { ascending: false });
+  if (res.error) {
+    res = await supabase.from("users").select("*").order("created_at", { ascending: false });
+  }
+  if (res.error) throw res.error;
+  return (res.data ?? []).map((u: any) => ({
+    ...u,
+    branch_id: u.branch_id ?? null,
+    branch_name: u.branches?.name ?? null,
+  })) as Profile[];
+}
+
+/** Assign a barista/staff member to a branch (admin only). */
+export async function setStaffBranch(userId: string, branchId: string): Promise<void> {
+  const { error } = await supabase.rpc("set_staff_branch", {
+    p_user_id: userId,
+    p_branch_id: branchId,
+  });
   if (error) throw error;
-  return (data ?? []) as Profile[];
 }
 
 export async function setUserRole(userId: string, role: UserRole): Promise<void> {

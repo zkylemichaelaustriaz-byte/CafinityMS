@@ -11,7 +11,7 @@ import { StickyActionBar } from "@/components/ui/StickyActionBar";
 import { Colors } from "@/constants/theme";
 import { getOrder } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
-import { formatDateTime, peso, pickupNumber } from "@/lib/format";
+import { formatDateTime, peso, pickupNumber, statusLabel } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import {
   buildReceiptHtml,
@@ -22,12 +22,26 @@ import {
 } from "@/lib/receiptHtml";
 import type { Order } from "@/types/models";
 
+// Theme-neutral receipt "paper" — always warm ivory + espresso ink so the
+// on-screen preview matches the exported PDF in both light and dark mode.
+const PAPER = {
+  bg: "#FBF7EF",
+  ink: "#2A1D14",
+  sub: "#8A7C6E",
+  body: "#4A3D31",
+  line: "#EFE7D9",
+  dash: "#DCD0BF",
+  good: "#2E7D52",
+  pending: "#B23B0E",
+};
+
 export default function ReceiptScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [opts, setOpts] = useState<ReceiptOptions>(DEFAULT_RECEIPT_OPTIONS);
   const [sharing, setSharing] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -88,160 +102,238 @@ export default function ReceiptScreen() {
   }
 
   const pickup = pickupNumber(order) ?? order.order_number ?? "—";
+  const paymentPending = order.payment_method === "Cash" && order.payment_status !== "paid";
 
   return (
     <Screen edges={["top"]}>
       <Header title="Digital receipt" />
       <ScrollView contentContainerClassName="p-5 pb-40" showsVerticalScrollIndicator={false}>
-        {/* Customize */}
-        <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-textMuted">
-          Theme
-        </Text>
-        <View className="mb-4 flex-row gap-3">
-          {RECEIPT_ACCENTS.map((a) => {
-            const on = opts.accent === a.value;
-            return (
-              <Pressable
-                key={a.value}
-                onPress={() => set("accent", a.value)}
-                accessibilityLabel={a.label}
-                accessibilityState={{ selected: on }}
-                className="items-center"
-              >
-                <View
-                  style={{ backgroundColor: a.value, borderColor: on ? a.value : "transparent" }}
-                  className={`h-10 w-10 items-center justify-center rounded-full ${on ? "border-2" : ""}`}
-                >
-                  {on ? <Ionicons name="checkmark" size={18} color="#fff" /> : null}
-                </View>
-                <Text className="mt-1 text-[10px] text-textMuted">{a.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-textMuted">
-          Personal note
-        </Text>
-        <TextInput
-          value={opts.headerNote}
-          onChangeText={(t) => set("headerNote", t)}
-          placeholder="e.g. Thanks for the coffee run!"
-          placeholderTextColor="#B8A99C"
-          maxLength={80}
-          className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-textPrimary"
-        />
-
-        <View className="mb-5 overflow-hidden rounded-2xl border border-line bg-surface">
-          <ToggleRow
-            label="Item customizations"
-            value={opts.showCustomizations}
-            onChange={(v) => set("showCustomizations", v)}
+        {/* Collapsed customize controls — the preview stays the focus */}
+        <Pressable
+          onPress={() => setCustomizeOpen((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: customizeOpen }}
+          className="mb-4 flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3"
+        >
+          <View className="flex-row items-center gap-2">
+            <Ionicons name="options-outline" size={18} color={Colors.brand} />
+            <Text className="text-sm font-semibold text-textPrimary">Customize receipt</Text>
+          </View>
+          <Ionicons
+            name={customizeOpen ? "chevron-up" : "chevron-down"}
+            size={18}
+            color={Colors.textMuted}
           />
-          {order.tip_amount ? (
-            <ToggleRow label="Tip" value={opts.showTip} onChange={(v) => set("showTip", v)} border />
-          ) : null}
-          <ToggleRow
-            label="Tax / VAT breakdown"
-            value={opts.showTax}
-            onChange={(v) => set("showTax", v)}
-            border
-          />
-          <ToggleRow
-            label="Loyalty points"
-            value={opts.showPoints}
-            onChange={(v) => set("showPoints", v)}
-            border
-          />
-        </View>
+        </Pressable>
 
-        {/* Live preview */}
-        <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-textMuted">
-          Preview
-        </Text>
-        <View className="overflow-hidden rounded-card border border-line bg-surface">
-          <View style={{ backgroundColor: opts.accent }} className="items-center px-6 py-5">
-            <Text className="font-display text-2xl text-white">Cafinity</Text>
-            <Text className="text-xs text-white/80">Coffee &amp; more</Text>
+        {customizeOpen ? (
+          <View className="mb-4">
+            <Text className="mb-2 text-xs font-semibold uppercase tracking-wide text-textMuted">
+              Accent
+            </Text>
+            <View className="mb-4 flex-row gap-3">
+              {RECEIPT_ACCENTS.map((a) => {
+                const on = opts.accent === a.value;
+                return (
+                  <Pressable
+                    key={a.value}
+                    onPress={() => set("accent", a.value)}
+                    accessibilityLabel={a.label}
+                    accessibilityState={{ selected: on }}
+                    className="items-center"
+                  >
+                    <View
+                      style={{ backgroundColor: a.value }}
+                      className={`h-10 w-10 items-center justify-center rounded-full ${on ? "border-2 border-textPrimary" : ""}`}
+                    >
+                      {on ? <Ionicons name="checkmark" size={18} color="#fff" /> : null}
+                    </View>
+                    <Text className="mt-1 text-[10px] text-textMuted">{a.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-textMuted">
+              Personal note
+            </Text>
+            <TextInput
+              value={opts.headerNote}
+              onChangeText={(t) => set("headerNote", t)}
+              placeholder="e.g. Thanks for the coffee run!"
+              placeholderTextColor={Colors.textMuted}
+              maxLength={80}
+              className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-textPrimary"
+            />
+
+            <View className="overflow-hidden rounded-2xl border border-line bg-surface">
+              <ToggleRow
+                label="Item customizations"
+                value={opts.showCustomizations}
+                onChange={(v) => set("showCustomizations", v)}
+              />
+              {order.tip_amount ? (
+                <ToggleRow
+                  label="Tip"
+                  value={opts.showTip}
+                  onChange={(v) => set("showTip", v)}
+                  border
+                />
+              ) : null}
+              <ToggleRow
+                label="Tax / VAT breakdown"
+                value={opts.showTax}
+                onChange={(v) => set("showTax", v)}
+                border
+              />
+              <ToggleRow
+                label="Loyalty points"
+                value={opts.showPoints}
+                onChange={(v) => set("showPoints", v)}
+                border
+              />
+            </View>
+          </View>
+        ) : null}
+
+        {/* Live preview — theme-neutral ivory paper (matches the PDF) */}
+        <View
+          style={{ backgroundColor: PAPER.bg, borderColor: PAPER.line }}
+          className="overflow-hidden rounded-card border"
+        >
+          <View style={{ backgroundColor: opts.accent }} className="mx-6 mt-5 h-1 rounded-full" />
+          <View className="items-center px-6 pt-3">
+            <Text style={{ color: opts.accent }} className="font-display text-2xl">
+              Cafinity
+            </Text>
+            <Text style={{ color: PAPER.sub }} className="text-xs">
+              Coffee &amp; more
+            </Text>
+            <Text style={{ color: PAPER.ink }} className="mt-2 text-sm font-bold">
+              {order.branches?.name ?? "Cafinity"}
+            </Text>
+            {order.branches?.address ? (
+              <Text style={{ color: PAPER.sub }} className="text-[11px]">
+                {order.branches.address}
+              </Text>
+            ) : null}
             {opts.headerNote.trim() ? (
-              <Text className="mt-2 text-center text-sm italic text-white/95">
+              <Text style={{ color: PAPER.body }} className="mt-2 text-center text-sm italic">
                 {opts.headerNote.trim()}
               </Text>
             ) : null}
           </View>
 
-          <View className="items-center border-b border-dashed border-line px-6 py-4">
-            <Text className="text-[11px] uppercase tracking-wide text-textMuted">Pickup number</Text>
+          <View style={{ borderColor: PAPER.dash }} className="mx-6 my-3 border-t border-dashed" />
+          <View className="items-center px-6">
+            <Text style={{ color: PAPER.sub }} className="text-[10px] uppercase tracking-[2px]">
+              Pickup number
+            </Text>
             <Text style={{ color: opts.accent }} className="font-display text-4xl">
               {pickup}
             </Text>
           </View>
-
-          <View className="border-b border-dashed border-line px-6 py-3">
-            {order.order_number ? (
-              <Text className="text-xs text-textMuted">Ref {order.order_number}</Text>
-            ) : null}
-            <Text className="text-xs text-textMuted">{formatDateTime(order.created_at)}</Text>
-            <Text className="text-xs text-textMuted">
-              Pickup at {order.branches?.name ?? "your branch"}
-            </Text>
-          </View>
+          <View style={{ borderColor: PAPER.dash }} className="mx-6 my-3 border-t border-dashed" />
 
           <View className="px-6">
+            {order.order_number ? (
+              <MetaRow label="Reference" value={order.order_number} />
+            ) : null}
+            <MetaRow label="Date" value={formatDateTime(order.created_at)} />
+            <MetaRow label="Status" value={statusLabel(order.status)} />
+          </View>
+
+          <View className="mt-2 px-6">
             {(order.order_items ?? []).map((it) => (
-              <View key={it.id} className="flex-row border-b border-line py-2.5">
-                <Text style={{ color: opts.accent }} className="w-8 font-bold">
+              <View
+                key={it.id}
+                style={{ borderColor: PAPER.line }}
+                className="flex-row border-b py-2.5"
+              >
+                <Text style={{ color: opts.accent }} className="w-7 font-bold">
                   {it.quantity}×
                 </Text>
                 <View className="flex-1 pr-2">
-                  <Text className="text-sm font-semibold text-textPrimary">{it.product_name}</Text>
-                  <Text className="text-xs text-textMuted">{it.variant_name}</Text>
+                  <Text style={{ color: PAPER.ink }} className="text-sm font-semibold">
+                    {it.product_name}
+                  </Text>
+                  <Text style={{ color: PAPER.sub }} className="text-xs">
+                    {it.variant_name}
+                  </Text>
                   {opts.showCustomizations && it.order_item_customization.length > 0 ? (
-                    <Text className="text-xs text-textMuted">
+                    <Text style={{ color: PAPER.sub }} className="text-xs">
                       {it.order_item_customization.map((c) => c.option_name).join(" · ")}
                     </Text>
                   ) : null}
                   {it.item_notes ? (
-                    <Text className="text-xs italic text-textMuted">Note: {it.item_notes}</Text>
+                    <Text style={{ color: PAPER.sub }} className="text-xs italic">
+                      Note: {it.item_notes}
+                    </Text>
                   ) : null}
                 </View>
-                <Text className="text-sm font-semibold text-textPrimary">{peso(it.subtotal)}</Text>
+                <Text
+                  style={{ color: PAPER.ink, fontVariant: ["tabular-nums"] }}
+                  className="text-sm font-semibold"
+                >
+                  {peso(it.subtotal)}
+                </Text>
               </View>
             ))}
           </View>
 
-          <View className="px-6 py-3">
+          <View className="px-6 pt-3">
             {lines.map((l, i) => (
               <View key={i} className="flex-row justify-between py-0.5">
-                <Text
-                  className={`text-xs ${l.kind === "discount" ? "text-success" : "text-textSecondary"}`}
-                >
+                <Text style={{ color: l.kind === "discount" ? PAPER.good : PAPER.body }} className="text-xs">
                   {l.label}
                 </Text>
                 <Text
-                  className={`text-xs ${l.kind === "discount" ? "text-success" : "text-textPrimary"}`}
+                  style={{
+                    color: l.kind === "discount" ? PAPER.good : PAPER.ink,
+                    fontVariant: ["tabular-nums"],
+                  }}
+                  className="text-xs"
                 >
                   {l.value}
                 </Text>
               </View>
             ))}
-            <View className="mt-2 flex-row justify-between border-t-2 border-textPrimary pt-2">
-              <Text className="font-heading text-base text-textPrimary">Total</Text>
-              <Text className="font-display text-base text-textPrimary">
-                {peso(order.total_amount)}
-              </Text>
-            </View>
           </View>
 
-          <View className="flex-row justify-between px-6 pb-3">
-            <Text className="text-xs text-textMuted">{order.payment_method}</Text>
-            <Text className="text-xs text-textMuted">{order.payment_status}</Text>
+          <View
+            style={{ borderColor: PAPER.ink }}
+            className="mx-6 mt-2 flex-row justify-between border-t-2 pt-2"
+          >
+            <Text style={{ color: PAPER.ink }} className="font-display text-base">
+              Total
+            </Text>
+            <Text
+              style={{ color: PAPER.ink, fontVariant: ["tabular-nums"] }}
+              className="font-display text-base"
+            >
+              {peso(order.total_amount)}
+            </Text>
           </View>
+
+          {paymentPending ? (
+            <Text style={{ color: PAPER.pending }} className="mx-6 mt-2 text-xs font-bold">
+              {order.payment_method} — Payment pending
+            </Text>
+          ) : (
+            <View className="mx-6 mt-2 flex-row justify-between">
+              <Text style={{ color: PAPER.sub }} className="text-xs">
+                {order.payment_method}
+              </Text>
+              <Text style={{ color: PAPER.sub }} className="text-xs">
+                {order.payment_status}
+              </Text>
+            </View>
+          )}
 
           {opts.showPoints ? (
             <View
               style={{ backgroundColor: `${opts.accent}14` }}
-              className="mx-6 mb-4 rounded-xl py-2"
+              className="mx-6 mt-3 rounded-xl py-2"
             >
               <Text style={{ color: opts.accent }} className="text-center text-xs font-bold">
                 {order.points_state === "earned"
@@ -253,7 +345,7 @@ export default function ReceiptScreen() {
             </View>
           ) : null}
 
-          <Text className="px-6 pb-5 text-center text-[11px] text-textMuted">
+          <Text style={{ color: PAPER.sub }} className="px-6 pb-5 pt-4 text-center text-[11px]">
             Thank you for choosing Cafinity ☕
           </Text>
         </View>
@@ -261,13 +353,27 @@ export default function ReceiptScreen() {
 
       <StickyActionBar>
         <Button
-          label={sharing ? "Preparing…" : "Share / Save PDF"}
+          label={sharing ? "Preparing…" : "Share or save receipt"}
           onPress={onShare}
           loading={sharing}
           haptic="light"
+          leftIcon={<Ionicons name="share-outline" size={18} color="#fff" />}
         />
       </StickyActionBar>
     </Screen>
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="flex-row justify-between py-0.5">
+      <Text style={{ color: PAPER.sub }} className="text-xs">
+        {label}
+      </Text>
+      <Text style={{ color: PAPER.ink }} className="text-xs font-semibold">
+        {value}
+      </Text>
+    </View>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Linking, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
@@ -41,30 +41,15 @@ export default function BranchesScreen() {
   const [loading, setLoading] = useState(true);
   const [locating, setLocating] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [locationDenied, setLocationDenied] = useState(false);
+  // checking → permission not yet read; prompt → can ask; denied → can re-ask;
+  // blocked → must enable in Settings; granted → located; unavailable → services off/failed.
+  const [locStatus, setLocStatus] = useState<
+    "checking" | "prompt" | "granted" | "denied" | "blocked" | "unavailable"
+  >("checking");
 
-  const load = useCallback(async () => {
+  const loadBranches = useCallback(async (lat: number | null, lon: number | null) => {
     setLoading(true);
     setError(null);
-    let lat: number | null = null;
-    let lon: number | null = null;
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
-      } else {
-        setLocationDenied(true);
-      }
-    } catch {
-      setLocationDenied(true);
-    } finally {
-      setLocating(false);
-    }
-
     try {
       setBranches(await getBranches(lat, lon));
     } catch (e) {
@@ -74,34 +59,104 @@ export default function BranchesScreen() {
     }
   }, []);
 
+  // Get a fix (permission already granted) and re-sort by distance.
+  const locate = useCallback(async () => {
+    setLocating(true);
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setLocStatus("granted");
+      await loadBranches(pos.coords.latitude, pos.coords.longitude);
+    } catch {
+      // Permission ok but no fix → device location likely off.
+      setLocStatus("unavailable");
+      await loadBranches(null, null);
+    } finally {
+      setLocating(false);
+    }
+  }, [loadBranches]);
+
+  // Explicit user action — only here do we open the OS permission prompt.
+  const requestAndLocate = useCallback(async () => {
+    setLocating(true);
+    const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+    if (status === "granted") {
+      await locate();
+    } else {
+      setLocStatus(canAskAgain ? "denied" : "blocked");
+      setLocating(false);
+      await loadBranches(null, null);
+    }
+  }, [locate, loadBranches]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void (async () => {
+      // Read current permission WITHOUT prompting; only an explicit tap prompts.
+      const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
+      if (status === "granted") {
+        await locate();
+      } else {
+        setLocStatus(status === "denied" ? (canAskAgain ? "denied" : "blocked") : "prompt");
+        setLocating(false);
+        await loadBranches(null, null);
+      }
+    })();
+  }, [locate, loadBranches]);
 
   function choose(branch: BranchWithDistance) {
     const cart = useCart.getState();
+    // Non-destructive switch: keep the cart and re-point it at the new branch.
+    // Any item not available there is flagged in the cart for the customer to
+    // remove/edit (no silent deletion).
     if (cart.lines.length > 0 && cart.branchId && cart.branchId !== branch.id) {
-      Alert.alert(
-        "Switch branch?",
-        "Your cart has items from another branch. Switching will clear your cart.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Switch & clear",
-            style: "destructive",
-            onPress: () => {
-              cart.clear();
-              setBranch(branch);
-              router.back();
-            },
-          },
-        ],
-      );
-      return;
+      cart.rebaseBranch(branch.id);
     }
     setBranch(branch);
     router.back();
   }
+
+  const band: {
+    icon: keyof typeof Ionicons.glyphMap;
+    title: string;
+    sub: string;
+    action: { label: string; onPress: () => void } | null;
+  } =
+    locating || locStatus === "checking"
+      ? { icon: "navigate", title: "Finding you…", sub: "Sorting branches by distance.", action: null }
+      : locStatus === "granted"
+        ? {
+            icon: "navigate",
+            title: "Sorted by what's nearest",
+            sub: "Pick a store to start your order.",
+            action: null,
+          }
+        : locStatus === "blocked"
+          ? {
+              icon: "lock-closed-outline",
+              title: "Location is blocked",
+              sub: "Turn it on in Settings to sort by distance — you can still pick any branch.",
+              action: { label: "Open settings", onPress: () => void Linking.openSettings() },
+            }
+          : locStatus === "unavailable"
+            ? {
+                icon: "warning-outline",
+                title: "Couldn't get your location",
+                sub: "Is location turned on? You can still pick a branch.",
+                action: { label: "Try again", onPress: () => void locate() },
+              }
+            : locStatus === "denied"
+              ? {
+                  icon: "location-outline",
+                  title: "Location is off",
+                  sub: "Enable location to sort by distance — you can still pick any branch.",
+                  action: { label: "Use location", onPress: () => void requestAndLocate() },
+                }
+              : {
+                  // prompt
+                  icon: "location-outline",
+                  title: "Find your nearest branch",
+                  sub: "Use your location to recommend the nearest Cafinity branch. You can still pick manually.",
+                  action: { label: "Use location", onPress: () => void requestAndLocate() },
+                };
 
   return (
     <Screen edges={["top", "bottom"]}>
@@ -110,26 +165,23 @@ export default function BranchesScreen() {
       {/* Location status band */}
       <View className="mx-4 mt-4 flex-row items-center gap-3 rounded-2xl bg-brand-900 p-4">
         <View className="h-10 w-10 items-center justify-center rounded-full bg-white/10">
-          <Ionicons
-            name={locationDenied ? "location-outline" : "navigate"}
-            size={20}
-            color={Colors.accent}
-          />
+          <Ionicons name={band.icon} size={20} color={Colors.accent} />
         </View>
         <View className="flex-1">
-          <Text className="text-sm font-bold text-white">
-            {locating
-              ? "Finding you…"
-              : locationDenied
-                ? "Location is off"
-                : "Sorted by what's nearest"}
-          </Text>
-          <Text className="text-xs text-brand-200">
-            {locationDenied
-              ? "Enable location to sort by distance — you can still pick any branch."
-              : "Pick a store to start your order."}
-          </Text>
+          <Text className="text-sm font-bold text-white">{band.title}</Text>
+          <Text className="text-xs text-brand-200">{band.sub}</Text>
         </View>
+        {locating ? (
+          <ActivityIndicator color={Colors.accent} />
+        ) : band.action ? (
+          <Pressable
+            onPress={band.action.onPress}
+            accessibilityRole="button"
+            className="rounded-full bg-white/15 px-3 py-2"
+          >
+            <Text className="text-xs font-bold text-white">{band.action.label}</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {loading ? (
@@ -140,7 +192,7 @@ export default function BranchesScreen() {
           </Text>
         </View>
       ) : error ? (
-        <ErrorState message={error} onRetry={load} />
+        <ErrorState message={error} onRetry={() => loadBranches(null, null)} />
       ) : (
         <FlatList
           data={branches}
@@ -171,12 +223,14 @@ export default function BranchesScreen() {
                     </View>
                     <Text className="mt-1 text-sm text-textSecondary">{item.address}</Text>
                     <View className="mt-2 flex-row flex-wrap items-center gap-x-3 gap-y-1.5">
-                      <View className="flex-row items-center gap-1">
-                        <Ionicons name="navigate" size={13} color={Colors.brand} />
-                        <Text className="text-xs font-medium text-brandPrimary">
-                          {formatDistance(item.distanceKm)}
-                        </Text>
-                      </View>
+                      {item.distanceKm != null ? (
+                        <View className="flex-row items-center gap-1">
+                          <Ionicons name="navigate" size={13} color={Colors.brand} />
+                          <Text className="text-xs font-medium text-brandPrimary">
+                            {formatDistance(item.distanceKm)}
+                          </Text>
+                        </View>
+                      ) : null}
                       <View className="flex-row items-center gap-1">
                         <Ionicons name="time-outline" size={13} color="#9A8A7B" />
                         <Text className="text-xs text-textMuted">

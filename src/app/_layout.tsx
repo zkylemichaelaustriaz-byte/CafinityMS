@@ -13,7 +13,11 @@ import {
   Fraunces_700Bold,
   Fraunces_900Black,
 } from "@expo-google-fonts/fraunces";
+import { NetworkProvider } from "@/components/NetworkProvider";
 import { AppLoading } from "@/components/ui/AppLoading";
+import { OfflineBanner } from "@/components/ui/OfflineBanner";
+import { ThemeTransitionOverlay } from "@/components/ui/ThemeTransitionOverlay";
+import { APP_LAUNCH_MINIMUM_DURATION_MS, APP_LAUNCH_TIMEOUT_MS } from "@/config/launch";
 import { AppThemeProvider, useResolvedTheme } from "@/theme/AppThemeProvider";
 import { useAppearance } from "@/store/appearance";
 import { useAuth } from "@/store/auth";
@@ -73,15 +77,16 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [hydrateSeasonal]);
 
-  // Branded cold-start: keep the loader visible ~2.5s minimum (cold start only).
+  // Branded cold-start: keep the loader visible for the central minimum (cold
+  // start only — not replayed on navigation or brief backgrounding).
   useEffect(() => {
-    const t = setTimeout(() => setMinElapsed(true), 2500);
+    const t = setTimeout(() => setMinElapsed(true), APP_LAUNCH_MINIMUM_DURATION_MS);
     return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
     if (ready) return;
-    const t = setTimeout(() => setTimedOut(true), 12000);
+    const t = setTimeout(() => setTimedOut(true), APP_LAUNCH_TIMEOUT_MS);
     return () => clearTimeout(t);
   }, [ready]);
 
@@ -93,6 +98,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AppThemeProvider>
+          <NetworkProvider />
           {!showApp ? (
             <AppLoading
               timedOut={timedOut}
@@ -104,6 +110,8 @@ export default function RootLayout() {
           ) : (
             <RootNavigator />
           )}
+          <OfflineBanner />
+          <ThemeTransitionOverlay />
         </AppThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

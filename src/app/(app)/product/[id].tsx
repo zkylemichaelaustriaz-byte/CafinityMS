@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -15,6 +15,7 @@ import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
 import { getMenu, getProduct } from "@/lib/api";
 import { categoryEmoji, peso } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { MAX_ITEM_QUANTITY } from "@/lib/limits";
 import { pairingFor } from "@/lib/productPairings";
 import {
   presentationFromOptionNames,
@@ -49,6 +50,15 @@ export default function ProductScreen() {
   const [notes, setNotes] = useState("");
   const [paired, setPaired] = useState<MenuProduct | null>(null);
   const [pairedAdded, setPairedAdded] = useState(false);
+  // Validation: highlight + scroll to a required single-choice group left empty.
+  const [invalidGroupId, setInvalidGroupId] = useState<string | null>(null);
+  const sectionY = useRef(0);
+  const groupY = useRef<Record<string, number>>({});
+
+  function scrollToGroup(groupId: string) {
+    const y = Math.max(0, sectionY.current + (groupY.current[groupId] ?? 0) - 16);
+    scrollRef.current?.scrollTo({ y, animated: true });
+  }
 
   useEffect(() => {
     void (async () => {
@@ -141,6 +151,7 @@ export default function ProductScreen() {
 
   function toggle(group: CustomizationGroup, optionId: string) {
     haptics.selection();
+    if (invalidGroupId === group.id) setInvalidGroupId(null);
     setSelections((prev) => {
       const cur = prev[group.id] ?? [];
       if (group.selection_type === "single") {
@@ -156,6 +167,17 @@ export default function ProductScreen() {
   function addToCart() {
     if (!product || !variant || !branch) return;
     if (!product.orderable) return;
+    // Single-choice groups are required: block + focus the first empty one.
+    const missing = product.groups.find(
+      (g) => g.selection_type === "single" && (selections[g.id]?.length ?? 0) === 0,
+    );
+    if (missing) {
+      setInvalidGroupId(missing.id);
+      haptics.warning();
+      scrollToGroup(missing.id);
+      return;
+    }
+    setInvalidGroupId(null);
     if (editLine) {
       // Edit-in-place: keep the same lineId/position in the cart.
       replaceLine(editLine.lineId, {
@@ -287,7 +309,12 @@ export default function ProductScreen() {
           </Pressable>
         </View>
 
-        <View className="px-5 pt-5">
+        <View
+          className="px-5 pt-5"
+          onLayout={(e) => {
+            sectionY.current = e.nativeEvent.layout.y;
+          }}
+        >
           <Text className="font-display text-2xl text-textPrimary">{product.name}</Text>
           <Text className="mt-1.5 text-sm leading-5 text-textSecondary">
             {product.description}
@@ -340,12 +367,24 @@ export default function ProductScreen() {
           ) : null}
 
           {/* Customization */}
-          {product.groups.map((g) => (
-            <View key={g.id} className="mt-6">
+          {product.groups.map((g) => {
+            const invalid = invalidGroupId === g.id;
+            return (
+            <View
+              key={g.id}
+              className="mt-6"
+              onLayout={(e) => {
+                groupY.current[g.id] = e.nativeEvent.layout.y;
+              }}
+            >
               <View className="mb-2 flex-row items-center gap-2">
                 <Text className="font-heading text-base text-textPrimary">{g.name}</Text>
-                <Text className="text-xs text-textMuted">
-                  {g.selection_type === "single" ? "Choose 1" : "Choose any"}
+                <Text className={`text-xs ${invalid ? "font-semibold text-danger" : "text-textMuted"}`}>
+                  {g.selection_type === "single"
+                    ? invalid
+                      ? "Please choose one"
+                      : "Choose 1"
+                    : "Choose any"}
                 </Text>
                 {(selections[g.id]?.length ?? 0) > 0 ? (
                   <Ionicons
@@ -356,7 +395,9 @@ export default function ProductScreen() {
                   />
                 ) : null}
               </View>
-              <View className="overflow-hidden rounded-2xl border border-line bg-surface">
+              <View
+                className={`overflow-hidden rounded-2xl border bg-surface ${invalid ? "border-danger" : "border-line"}`}
+              >
                 {g.options.map((o, idx) => {
                   const sel = (selections[g.id] ?? []).includes(o.id);
                   const single = g.selection_type === "single";
@@ -389,7 +430,8 @@ export default function ProductScreen() {
                 })}
               </View>
             </View>
-          ))}
+            );
+          })}
 
           {/* Pairs well with */}
           {paired ? (
@@ -453,7 +495,7 @@ export default function ProductScreen() {
               onChangeText={setNotes}
               onFocus={handleFocus}
               placeholder="e.g. extra hot, no straw"
-              placeholderTextColor="#B8A99C"
+              placeholderTextColor={Colors.textMuted}
               multiline
               maxLength={200}
               textAlignVertical="top"
@@ -479,8 +521,13 @@ export default function ProductScreen() {
               .join("  ·  ")}
           </Text>
         ) : null}
+        {quantity >= MAX_ITEM_QUANTITY ? (
+          <Text className="mb-1.5 text-[11px] font-medium text-warning">
+            Maximum of {MAX_ITEM_QUANTITY} per item.
+          </Text>
+        ) : null}
         <View className="flex-row items-center gap-3">
-          <QuantityStepper value={quantity} onChange={setQuantity} />
+          <QuantityStepper value={quantity} onChange={setQuantity} max={MAX_ITEM_QUANTITY} />
           <AnimatedPressable
             onPress={addToCart}
             disabled={!variant?.is_available || !product.orderable}

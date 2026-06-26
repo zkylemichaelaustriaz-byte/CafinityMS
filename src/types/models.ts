@@ -22,6 +22,8 @@ export interface Profile {
   loyalty_points: number;
   current_streak: number;
   last_order_date: string | null;
+  branch_id: string | null;
+  branch_name: string | null;
   created_at: string;
   updated_at: string;
 }

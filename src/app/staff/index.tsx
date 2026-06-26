@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { Badge } from "@/components/ui/Badge";
+import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PriceText } from "@/components/ui/PriceText";
@@ -29,9 +30,10 @@ import {
 } from "@/lib/api";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { humanizeError } from "@/lib/errors";
-import { formatEta, pickupOrRef, statusLabel } from "@/lib/format";
+import { formatEta, pickupOrRef } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { mapOrderError } from "@/lib/orderErrors";
+import { orderStatusLabel, orderStatusTone } from "@/lib/orderStatus";
 import { useStaffPrefs } from "@/store/staffPrefs";
 import type { Branch, Order, OrderStatus } from "@/types/models";
 
@@ -98,6 +100,7 @@ export default function StaffQueueScreen() {
   const [lastSync, setLastSync] = useState(Date.now());
   const [sort, setSort] = useState<SortMode>("fifo");
   const [filter, setFilter] = useState<FilterMode>("all");
+  const [branchSheet, setBranchSheet] = useState(false);
   const [undo, setUndo] = useState<{ orderId: string; label: string } | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevIds = useRef<Set<string>>(new Set());
@@ -163,7 +166,7 @@ export default function StaffQueueScreen() {
       await load();
       // Offer a brief undo for reversible steps (not for completion).
       if (newStatus === "preparing" || newStatus === "ready") {
-        setUndo({ orderId: order.id, label: statusLabel(newStatus) });
+        setUndo({ orderId: order.id, label: orderStatusLabel(newStatus, "staff") });
         if (undoTimer.current) clearTimeout(undoTimer.current);
         undoTimer.current = setTimeout(() => setUndo(null), 5000);
       }
@@ -284,32 +287,13 @@ export default function StaffQueueScreen() {
         </AnimatedPressable>
       </View>
 
-      {/* Branch filter */}
+      {/* Branch selector (location-style field — not a filter pill) */}
       <View className="px-5 py-2">
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={[{ id: "all", name: "All branches" }, ...branches]}
-          keyExtractor={(b) => b.id}
-          contentContainerClassName="gap-2"
-          renderItem={({ item }) => {
-            const id = item.id === "all" ? null : item.id;
-            const active = branchId === id;
-            return (
-              <Pressable
-                onPress={() => setBranchId(id)}
-                className={`h-9 justify-center rounded-full px-4 ${
-                  active ? "bg-brandPrimary" : "bg-surface border border-line"
-                }`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}
-                >
-                  {item.name}
-                </Text>
-              </Pressable>
-            );
-          }}
+        <BranchSelectorField
+          branch={branches.find((b) => b.id === branchId) ?? null}
+          showAll
+          label="Branch"
+          onPress={() => setBranchSheet(true)}
         />
       </View>
 
@@ -332,7 +316,7 @@ export default function StaffQueueScreen() {
           value={query}
           onChangeText={setQuery}
           placeholder="Search order number"
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           autoCapitalize="characters"
           autoCorrect={false}
           returnKeyType="search"
@@ -479,7 +463,7 @@ export default function StaffQueueScreen() {
                     ) : null}
                     <View
                       className={`rounded-full px-2 py-0.5 ${
-                        cashUnpaidFor(item) ? "bg-amber-100" : "bg-green-100"
+                        cashUnpaidFor(item) ? "bg-warningSoft" : "bg-successSoft"
                       }`}
                     >
                       <Text
@@ -493,8 +477,8 @@ export default function StaffQueueScreen() {
                       </Text>
                     </View>
                     <Badge
-                      label={statusLabel(item.status)}
-                      tone={item.status === "ready" ? "blue" : item.status === "preparing" ? "amber" : "gray"}
+                      label={orderStatusLabel(item.status, "staff")}
+                      tone={orderStatusTone(item.status)}
                     />
                   </View>
                 </View>
@@ -564,7 +548,7 @@ export default function StaffQueueScreen() {
                         <AnimatedPressable
                           onPress={() => confirmCash(item)}
                           disabled={busyId === item.id}
-                          className="flex-row items-center gap-1.5 rounded-xl border border-green-300 bg-successSoft px-3.5 py-2.5"
+                          className="flex-row items-center gap-1.5 rounded-xl border border-success bg-successSoft px-3.5 py-2.5"
                         >
                           {busyId === item.id ? (
                             <ActivityIndicator color={Colors.success} size="small" />
@@ -615,6 +599,15 @@ export default function StaffQueueScreen() {
           </View>
         </View>
       ) : null}
+
+      <BranchPickerSheet
+        visible={branchSheet}
+        branches={branches}
+        selectedId={branchId}
+        allowAll
+        onSelect={setBranchId}
+        onClose={() => setBranchSheet(false)}
+      />
     </Screen>
   );
 }

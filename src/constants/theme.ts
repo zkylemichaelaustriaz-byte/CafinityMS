@@ -17,6 +17,9 @@ export interface ThemeColors {
   textPrimary: string;
   textSecondary: string;
   textMuted: string;
+  textDisabled: string;
+  textInverse: string;
+  textLink: string;
   brandPrimary: string;
   brandSecondary: string;
   secondary: string;
@@ -24,10 +27,17 @@ export interface ThemeColors {
   accent: string;
   accentSoft: string;
   border: string;
+  borderStrong: string;
+  surfaceSelected: string;
+  surfaceDisabled: string;
   success: string;
   warning: string;
   danger: string;
   info: string;
+  onSuccess: string;
+  onWarning: string;
+  onDanger: string;
+  onInfo: string;
   disabled: string;
   overlay: string;
   skeleton: string;
@@ -42,18 +52,28 @@ export const lightTheme: ThemeColors = {
   surfaceElevated: "#FFFFFF",
   textPrimary: "#241913", // espresso ink
   textSecondary: "#756C66",
-  textMuted: "#8C827A",
+  textMuted: "#6E665F", // darkened for 4.5:1 on white + surfaceMuted
+  textDisabled: "#8B827A",
+  textInverse: "#FFFFFF",
+  textLink: "#2B6CB0",
   brandPrimary: "#572A15", // deep espresso — primary CTA / dark panels
   brandSecondary: "#9A6A43", // latte / mocha
   secondary: "#5E7A5A", // sage green — fresh secondary
   secondarySoft: "#E6EDE3",
   accent: "#E88725", // amber — energy, progress, highlights
   accentSoft: "#F8E4C8",
-  border: "#EAE5DF", // light neutral border
+  border: "#EAE5DF", // light neutral divider
+  borderStrong: "#8C8278", // 3:1 — meaningful control borders
+  surfaceSelected: "#F8E4C8",
+  surfaceDisabled: "#EDE8E2",
   success: "#2F855A",
   warning: "#D97E27",
   danger: "#C0392B",
   info: "#2B6CB0",
+  onSuccess: "#FFFFFF",
+  onWarning: "#241913",
+  onDanger: "#FFFFFF",
+  onInfo: "#FFFFFF",
   disabled: "#D6C9BA",
   overlay: "rgba(30,18,12,0.55)",
   skeleton: "#ECE7E1",
@@ -68,18 +88,28 @@ export const darkTheme: ThemeColors = {
   surfaceElevated: "#34302B",
   textPrimary: "#F5EFE7",
   textSecondary: "#BDB3A8",
-  textMuted: "#8E857C",
-  brandPrimary: "#B0784E",
+  textMuted: "#AAA197", // lightened for 4.5:1 on raised surfaces
+  textDisabled: "#968D83",
+  textInverse: "#1A120A",
+  textLink: "#7AAEE0",
+  brandPrimary: "#C2885C", // lightened for 4.5:1 as text on surfaces
   brandSecondary: "#A86B43",
   secondary: "#7FA078",
   secondarySoft: "#27341F",
   accent: "#E8A24A",
   accentSoft: "#3A2A18",
   border: "#48423C",
+  borderStrong: "#7D746B", // 3:1 — meaningful control borders
+  surfaceSelected: "#3A2A18",
+  surfaceDisabled: "#262320",
   success: "#48BB78",
   warning: "#E0922F",
-  danger: "#E05A4B",
+  danger: "#E86A5C", // lightened for 4.5:1 on dangerSoft
   info: "#5A9BD4",
+  onSuccess: "#1A120A",
+  onWarning: "#1A120A",
+  onDanger: "#1A120A",
+  onInfo: "#1A120A",
   disabled: "#4A3B2C",
   overlay: "rgba(0,0,0,0.6)",
   skeleton: "#2E2216",
