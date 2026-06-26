@@ -10,25 +10,44 @@ Notifications.setNotificationHandler({
   }),
 });
 
-let requested = false;
+export type NotifPermission = "granted" | "denied" | "blocked" | "undetermined";
 
-export async function ensureNotificationPermission(): Promise<void> {
-  if (requested) return;
-  requested = true;
+function normalize(p: Notifications.NotificationPermissionsStatus): NotifPermission {
+  if (p.status === "granted") return "granted";
+  if (p.status === "denied") return p.canAskAgain ? "denied" : "blocked";
+  return "undetermined";
+}
+
+/** Read the current OS notification permission WITHOUT prompting. */
+export async function getNotificationPermission(): Promise<NotifPermission> {
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== "granted") {
-      await Notifications.requestPermissionsAsync();
-    }
+    return normalize(await Notifications.getPermissionsAsync());
   } catch {
-    // notifications are best-effort in Expo Go
+    return "undetermined";
   }
 }
 
-/** Fire a local notification immediately (used for order status updates). */
+/** Explicit, user-initiated permission request (the only place we prompt). */
+export async function requestNotificationPermission(): Promise<NotifPermission> {
+  try {
+    const cur = await Notifications.getPermissionsAsync();
+    if (cur.status === "granted") return "granted";
+    if (cur.status === "denied" && !cur.canAskAgain) return "blocked";
+    return normalize(await Notifications.requestPermissionsAsync());
+  } catch {
+    return "undetermined";
+  }
+}
+
+/**
+ * Fire a local notification immediately (order status updates). Only fires when
+ * permission is ALREADY granted — never prompts silently. The user opts in from
+ * the notifications screen.
+ */
 export async function notifyLocal(title: string, body: string): Promise<void> {
   try {
-    await ensureNotificationPermission();
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") return;
     await Notifications.scheduleNotificationAsync({
       content: { title, body },
       trigger: null,

@@ -29,7 +29,12 @@ export function QuantityStepper({
       >
         <Ionicons name="remove" size={18} color={Colors.brand} />
       </Pressable>
-      <Text className={`text-center font-bold text-textPrimary ${num}`}>{value}</Text>
+      <Text
+        accessibilityLabel={`Quantity, ${value}`}
+        className={`text-center font-bold text-textPrimary ${num}`}
+      >
+        {value}
+      </Text>
       <Pressable
         onPress={() => onChange(Math.min(max, value + 1))}
         disabled={value >= max}

@@ -99,7 +99,7 @@ export default function AdminMenuScreen() {
           value={query}
           onChangeText={setQuery}
           placeholder="Search products"
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           autoCorrect={false}
           className="flex-1 px-2 py-3 text-base text-textPrimary"
         />
@@ -160,7 +160,7 @@ export default function AdminMenuScreen() {
           renderItem={({ item }) => (
             <Pressable
               onPress={() => router.push(`/admin/product/${item.id}`)}
-              className="flex-row items-center rounded-2xl border border-brand-100 bg-surface p-3"
+              className="flex-row items-center rounded-2xl border border-line bg-surface p-3"
             >
               <ProductImage
                 source={localProductImage(item.name)}

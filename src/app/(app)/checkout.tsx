@@ -14,8 +14,9 @@ import { useKeyboardAwareScroll } from "@/components/ui/KeyboardAwareScrollView"
 import { Colors } from "@/constants/theme";
 import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
 import { getAppSettings, getAvailableVouchers, placeOrder, previewPromo, quoteOrder } from "@/lib/api";
+import { isOnline, useNetwork } from "@/store/network";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
-import { humanizeError } from "@/lib/errors";
+import { classifyError, humanizeError } from "@/lib/errors";
 import { formatDateTime, formatEta, lineTotal, peso } from "@/lib/format";
 import { resolveProductImage } from "@/lib/productMedia";
 import { useAuth } from "@/store/auth";
@@ -62,6 +63,10 @@ export default function CheckoutScreen() {
   const [customTip, setCustomTip] = useState("");
   const [notes, setNotes] = useState("");
   const [placing, setPlacing] = useState(false);
+  // Network-uncertain state: the order MAY have been created. Retrying is safe
+  // (idempotent via checkout_request_id), so we offer "check status" not "pay again".
+  const [verifying, setVerifying] = useState(false);
+  const online = useNetwork((s) => s.online);
   const [error, setError] = useState<string | null>(null);
   const keyboardVisible = useKeyboardVisible();
   const { scrollRef, handleFocus } = useKeyboardAwareScroll();
@@ -189,6 +194,11 @@ export default function CheckoutScreen() {
     setError(null);
     if (!branch || lines.length === 0) return;
 
+    if (!isOnline()) {
+      setError("You're offline. Connect to the internet to place your order — your cart is saved.");
+      return;
+    }
+
     if (cartBranchId && cartBranchId !== branch.id) {
       setError(
         "Your cart was started at a different branch. Go back to the cart and review it before checking out.",
@@ -224,6 +234,7 @@ export default function CheckoutScreen() {
       }
     }
 
+    setVerifying(false);
     setPlacing(true);
     try {
       const result = await placeOrder({
@@ -246,11 +257,19 @@ export default function CheckoutScreen() {
         idNumber: statutory ? idNumber.trim() : null,
         tip: tipAmount,
       });
+      setVerifying(false);
       clearCart();
       void refreshProfile();
       router.replace(`/order/${result.order_id}?new=1`);
     } catch (e) {
-      setError(humanizeError(e, "Could not place your order. Please try again."));
+      const kind = classifyError(e);
+      if (kind === "offline" || kind === "timeout") {
+        // Uncertain: the order may have been created. Enter verify mode instead
+        // of telling the user it failed (retry is idempotent).
+        setVerifying(true);
+      } else {
+        setError(humanizeError(e, "Could not place your order. Please try again."));
+      }
     } finally {
       setPlacing(false);
     }
@@ -367,14 +386,14 @@ export default function CheckoutScreen() {
               value={holderName}
               onChangeText={setHolderName}
               placeholder="Cardholder full name"
-              placeholderTextColor="#B8A99C"
+              placeholderTextColor={Colors.textMuted}
               className="mb-2 rounded-2xl border border-line bg-background px-4 py-3 text-base text-textPrimary"
             />
             <TextInput
               value={idNumber}
               onChangeText={setIdNumber}
               placeholder="PWD / Senior ID number"
-              placeholderTextColor="#B8A99C"
+              placeholderTextColor={Colors.textMuted}
               autoCapitalize="characters"
               className="rounded-2xl border border-line bg-background px-4 py-3 text-base text-textPrimary"
             />
@@ -449,7 +468,7 @@ export default function CheckoutScreen() {
               value={promoInput}
               onChangeText={(t) => setPromoInput(t.toUpperCase())}
               placeholder="e.g. WELCOME10"
-              placeholderTextColor="#B8A99C"
+              placeholderTextColor={Colors.textMuted}
               autoCapitalize="characters"
               className="flex-1 px-2 py-3 text-base text-textPrimary"
             />
@@ -563,7 +582,7 @@ export default function CheckoutScreen() {
                   onChangeText={setCustomTip}
                   keyboardType="number-pad"
                   placeholder="0"
-                  placeholderTextColor="#B8A99C"
+                  placeholderTextColor={Colors.textMuted}
                   className="ml-1 flex-1 px-2 py-3 text-base text-textPrimary"
                 />
               </View>
@@ -583,7 +602,7 @@ export default function CheckoutScreen() {
           onChangeText={setNotes}
           onFocus={handleFocus}
           placeholder="Optional — e.g. name for the cup"
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           multiline
           maxLength={300}
           textAlignVertical="top"
@@ -653,12 +672,42 @@ export default function CheckoutScreen() {
             <Text className="text-xs text-brandPrimary">Earn {pointsToEarn} pts</Text>
           </View>
         </View>
-        <Button
-          label={`Pay & place order · ${peso(total)}`}
-          onPress={onPlaceOrder}
-          loading={placing}
-          haptic="success"
-        />
+        {verifying ? (
+          <View className="rounded-2xl border border-info bg-infoSoft p-3">
+            <View className="flex-row items-center gap-2">
+              <Ionicons name="sync-outline" size={16} color={Colors.info} />
+              <Text className="font-bold text-textPrimary">Verifying your payment</Text>
+            </View>
+            <Text className="mt-1 text-xs text-textSecondary">
+              We couldn&apos;t confirm your last attempt. Don&apos;t pay again — check the status
+              first. If your order went through, it&apos;ll open automatically.
+            </Text>
+            <View className="mt-3 gap-2">
+              <Button
+                label="Check payment status"
+                onPress={onPlaceOrder}
+                loading={placing}
+                disabled={!online}
+                haptic="light"
+              />
+              <Pressable
+                onPress={() => router.replace("/orders")}
+                accessibilityRole="button"
+                className="items-center py-1.5"
+              >
+                <Text className="text-sm font-semibold text-brandPrimary">Go to my orders</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <Button
+            label={online ? `Pay & place order · ${peso(total)}` : "Offline — connect to order"}
+            onPress={onPlaceOrder}
+            loading={placing}
+            disabled={!online}
+            haptic="success"
+          />
+        )}
       </StickyActionBar>
       )}
     </Screen>

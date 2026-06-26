@@ -365,7 +365,7 @@ export default function AdminCampaignsScreen() {
                   </Text>
                 </View>
                 <View
-                  className={`rounded-full px-2.5 py-1 ${c.is_active ? "bg-green-100" : "bg-surfaceMuted"}`}
+                  className={`rounded-full px-2.5 py-1 ${c.is_active ? "bg-successSoft" : "bg-surfaceMuted"}`}
                 >
                   <Text
                     className={`text-xs font-semibold ${c.is_active ? "text-success" : "text-textSecondary"}`}

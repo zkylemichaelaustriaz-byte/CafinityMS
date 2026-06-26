@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { getProfile } from "@/lib/api";
+import { campaignSession } from "@/store/campaignSession";
 import { useFavorites } from "@/store/favorites";
 import { useNotifications } from "@/store/notifications";
 import type { Profile } from "@/types/models";
@@ -63,6 +64,8 @@ export const useAuth = create<AuthState>((set, get) => ({
       password,
     });
     if (error) throw error;
+    // Re-arm the seasonal ad so it shows on this login.
+    campaignSession.reset();
   },
 
   signUp: async (firstName, lastName, email, password) => {
@@ -80,6 +83,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     //    races the session clear (NotificationProvider unmounts on redirect).
     useNotifications.getState().reset();
     useFavorites.getState().reset();
+    campaignSession.reset();
 
     // 2) Attempt the remote (global) sign-out, but NEVER let a network failure
     //    leave the user half-authenticated.

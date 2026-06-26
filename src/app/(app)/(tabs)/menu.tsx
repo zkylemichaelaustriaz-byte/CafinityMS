@@ -203,7 +203,7 @@ export default function MenuScreen() {
           onSubmitEditing={commitSearch}
           returnKeyType="search"
           placeholder="Search drinks…"
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           className="flex-1 px-2 py-3 text-base text-textPrimary"
         />
         {search ? (

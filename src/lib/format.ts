@@ -1,3 +1,4 @@
+import { orderStatusLabel } from "@/lib/orderStatus";
 import type { CartLine } from "@/types/models";
 
 /** Format a number as Philippine Peso, e.g. 155 -> "₱155.00". */
@@ -63,21 +64,9 @@ export function pickupOrRef(o: {
 }
 
 /** Short human label for an order status. */
+/** Customer-facing status label — delegates to the centralized presentation. */
 export function statusLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "Order placed";
-    case "preparing":
-      return "Preparing";
-    case "ready":
-      return "Ready for pickup";
-    case "completed":
-      return "Completed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return status;
-  }
+  return orderStatusLabel(status, "customer");
 }
 
 /** Emoji used as an image fallback, by category name. */

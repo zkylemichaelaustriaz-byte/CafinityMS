@@ -56,8 +56,8 @@ export function AppLoading({
 
       <Animated.View style={{ opacity: wordmarkOpacity }}>
         <Text className="mt-4 font-display text-3xl text-brandPrimary">Cafinity</Text>
-        <Text className="mt-0.5 text-center text-[11px] uppercase tracking-[3px] text-textMuted">
-          Coffee &amp; more
+        <Text className="mt-1 text-center text-xs text-textMuted">
+          Coffee, prepared your way.
         </Text>
       </Animated.View>
 

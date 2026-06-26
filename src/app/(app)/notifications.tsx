@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { FlatList, Pressable, RefreshControl, Switch, Text, View } from "react-native";
+import { FlatList, Linking, Pressable, RefreshControl, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -9,6 +9,11 @@ import { Colors } from "@/constants/theme";
 import { getNotificationPreferences, updateNotificationPreferences } from "@/lib/api";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { formatDateTime } from "@/lib/format";
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+  type NotifPermission,
+} from "@/lib/notify";
 import { useNotifications } from "@/store/notifications";
 import type { AppNotification, NotificationPreferences } from "@/types/models";
 
@@ -43,16 +48,22 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [showPrefs, setShowPrefs] = useState(false);
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
+  const [perm, setPerm] = useState<NotifPermission>("granted"); // optimistic; checked on mount
 
   useFocusEffect(
     useCallback(() => {
       void refresh();
+      void getNotificationPermission().then(setPerm);
     }, [refresh]),
   );
 
   useEffect(() => {
     getNotificationPreferences().then(setPrefs).catch(() => {});
   }, []);
+
+  async function enableNotifications() {
+    setPerm(await requestNotificationPermission());
+  }
 
   async function onRefresh() {
     setRefreshing(true);
@@ -63,7 +74,14 @@ export default function NotificationsScreen() {
   function open(n: AppNotification) {
     if (!n.read_at) markRead(n.id);
     const orderId = n.data?.order_id;
-    if (typeof orderId === "string") router.push(`/order/${orderId}`);
+    if (typeof orderId === "string") {
+      router.push(`/order/${orderId}`);
+      return;
+    }
+    // Reward / voucher notifications deep-link to the Rewards area.
+    if (n.type.includes("reward") || n.type.includes("voucher")) {
+      router.push("/rewards");
+    }
   }
 
   function togglePref(key: keyof NotificationPreferences, value: boolean) {
@@ -90,6 +108,28 @@ export default function NotificationsScreen() {
         <View className="flex-row items-center gap-1.5 bg-surfaceMuted px-5 py-2">
           <Ionicons name="cloud-offline-outline" size={14} color={Colors.textMuted} />
           <Text className="text-xs text-textMuted">Live updates unavailable · pull to refresh</Text>
+        </View>
+      ) : null}
+
+      {/* Contextual opt-in — we only prompt the OS here, never silently */}
+      {perm !== "granted" ? (
+        <View className="mx-4 mt-3 rounded-2xl border border-line bg-surface p-3">
+          <View className="flex-row items-center gap-2">
+            <Ionicons name="notifications-outline" size={16} color={Colors.brand} />
+            <Text className="font-heading text-sm text-textPrimary">Turn on notifications</Text>
+          </View>
+          <Text className="mt-1 text-xs text-textSecondary">
+            Allow notifications to know when your order is being prepared and ready for pickup.
+          </Text>
+          <Pressable
+            onPress={perm === "blocked" ? () => void Linking.openSettings() : enableNotifications}
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-full bg-brandPrimary px-4 py-2"
+          >
+            <Text className="text-xs font-bold text-white">
+              {perm === "blocked" ? "Open settings" : "Enable notifications"}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
 

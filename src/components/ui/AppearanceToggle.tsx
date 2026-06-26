@@ -1,5 +1,6 @@
 import { Pressable, Text, View } from "react-native";
 import { useResolvedTheme } from "@/theme/AppThemeProvider";
+import { useChangeAppearance } from "@/hooks/useChangeAppearance";
 import { haptics } from "@/lib/haptics";
 import type { AppearancePref } from "@/store/appearance";
 
@@ -11,7 +12,8 @@ const OPTIONS: AppearancePref[] = ["system", "light", "dark"];
  * Admin all change the same setting and reflect it instantly everywhere.
  */
 export function AppearanceToggle() {
-  const { preference, setPreference } = useResolvedTheme();
+  const { preference } = useResolvedTheme();
+  const changeAppearance = useChangeAppearance();
   return (
     <View className="flex-row rounded-2xl bg-surfaceMuted p-1">
       {OPTIONS.map((opt) => {
@@ -21,7 +23,7 @@ export function AppearanceToggle() {
             key={opt}
             onPress={() => {
               if (opt !== preference) haptics.selection();
-              setPreference(opt);
+              changeAppearance(opt);
             }}
             accessibilityRole="radio"
             accessibilityState={{ selected: active }}

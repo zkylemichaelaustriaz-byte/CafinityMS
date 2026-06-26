@@ -9,7 +9,8 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useNavigation, useRouter } from "expo-router";
+import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
 import { Field } from "@/components/ui/Field";
 import { Header } from "@/components/ui/Header";
 import { Screen } from "@/components/ui/Screen";
@@ -39,9 +40,12 @@ const CANCEL_LABEL: Record<AdminSettings["cancellation_policy"], string> = {
 
 export default function AdminSettingsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
+  const [original, setOriginal] = useState<AdminSettings | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchSheet, setBranchSheet] = useState(false);
   const [audit, setAudit] = useState<SettingsAuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -55,6 +59,7 @@ export default function AdminSettingsScreen() {
     Promise.all([getAdminSettings(), getBranchesAdmin()])
       .then(([s, b]) => {
         setSettings(s);
+        setOriginal(s);
         setBranches(b);
         if (b.length) setBranchId(b[0].id);
       })
@@ -72,6 +77,7 @@ export default function AdminSettingsScreen() {
     setSaving(true);
     try {
       await updateAppSettings(settings);
+      setOriginal(settings); // changes committed → no longer dirty
       haptics.success();
       reloadAudit();
       Alert.alert("Saved", "Settings updated.");
@@ -81,6 +87,27 @@ export default function AdminSettingsScreen() {
       setSaving(false);
     }
   }
+
+  // Dirty = app_settings edited since load/save (branch ETA has its own save).
+  const dirty =
+    !!settings && !!original && JSON.stringify(settings) !== JSON.stringify(original);
+
+  // Warn before leaving with unsaved app-settings changes.
+  useEffect(() => {
+    const unsub = navigation.addListener("beforeRemove", (e: any) => {
+      if (!dirty) return;
+      e.preventDefault();
+      Alert.alert("Discard changes?", "You have unsaved settings changes.", [
+        { text: "Keep editing", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => navigation.dispatch(e.data.action),
+        },
+      ]);
+    });
+    return unsub;
+  }, [navigation, dirty]);
 
   const branch = branches.find((b) => b.id === branchId) ?? null;
   function setBranchField(patch: Partial<Branch>) {
@@ -123,14 +150,18 @@ export default function AdminSettingsScreen() {
     <Screen edges={["top"]}>
       <Header title="Settings" />
       <ScrollView
-        contentContainerClassName="p-5 pb-12"
+        contentContainerClassName="p-5 pb-28"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
       >
-        {/* Pricing & taxes */}
-        <SectionTitle>Pricing &amp; taxes</SectionTitle>
+        <Group
+          icon="pricetags-outline"
+          title="Pricing & Taxes"
+          defaultOpen
+          summary={`${settings.business_is_vat_registered ? "VAT registered" : "Not VAT-registered"} · ${Math.round(settings.vat_rate * 1000) / 10}% VAT`}
+        >
         <SwitchRow
           label="VAT-registered business"
           value={settings.business_is_vat_registered}
@@ -152,8 +183,13 @@ export default function AdminSettingsScreen() {
           onChange={(v) => set("show_vat_breakdown", v)}
         />
 
-        {/* Service fee */}
-        <SectionTitle>Service fee</SectionTitle>
+        </Group>
+
+        <Group
+          icon="cash-outline"
+          title="Fees & Tipping"
+          summary={`Service fee ${settings.service_fee_enabled ? "on" : "off"} · Tipping ${settings.tipping_enabled ? "on" : "off"}`}
+        >
         <SwitchRow
           label="Enable service fee"
           value={settings.service_fee_enabled}
@@ -191,24 +227,31 @@ export default function AdminSettingsScreen() {
           </>
         ) : null}
 
-        {/* Tipping */}
-        <SectionTitle>Tipping</SectionTitle>
         <SwitchRow
           label="Allow tipping"
           value={settings.tipping_enabled}
           onChange={(v) => set("tipping_enabled", v)}
         />
+        </Group>
 
-        {/* Loyalty */}
-        <SectionTitle>Loyalty</SectionTitle>
+        <Group
+          icon="gift-outline"
+          title="Loyalty & Rewards"
+          summary={`${settings.loyalty_points_per_peso} point${settings.loyalty_points_per_peso === 1 ? "" : "s"} per ₱1`}
+        >
         <NumberRow
           label="Points per ₱1 spent"
           value={settings.loyalty_points_per_peso}
           onChange={(n) => set("loyalty_points_per_peso", n)}
         />
 
-        {/* Discounts & cancellation */}
-        <SectionTitle>Discounts &amp; cancellation</SectionTitle>
+        </Group>
+
+        <Group
+          icon="ban-outline"
+          title="Discounts & Cancellations"
+          summary={CANCEL_LABEL[settings.cancellation_policy]}
+        >
         <View className="mb-3 rounded-xl bg-surfaceMuted px-3 py-2">
           <Text className="text-xs text-textSecondary">
             Discount stacking: one benefit per order (a promo, a voucher, or a statutory discount —
@@ -236,28 +279,27 @@ export default function AdminSettingsScreen() {
           onChange={(v) => set("cancellation_reason_required", v)}
         />
 
-        <View className="mt-5">
-          <SaveButton label="Save settings" onPress={save} loading={saving} />
-        </View>
+        </Group>
 
-        {/* Preparation time (per branch) */}
-        <SectionTitle>Preparation time (ETA)</SectionTitle>
-        <View className="mb-3 flex-row flex-wrap gap-2">
-          {branches.map((b) => {
-            const active = b.id === branchId;
-            return (
-              <Pressable
-                key={b.id}
-                onPress={() => setBranchId(b.id)}
-                className={`rounded-full px-3.5 py-2 ${active ? "bg-brandPrimary" : "border border-line bg-surface"}`}
-              >
-                <Text className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}>
-                  {b.name}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <Group
+          icon="time-outline"
+          title="Branch & Preparation Time"
+          summary={branch ? `${branch.name} · base ${branch.base_prep_minutes ?? 5} min` : "Per-branch ETA"}
+        >
+        <View className="mb-3">
+          <BranchSelectorField
+            branch={branches.find((b) => b.id === branchId) ?? null}
+            label="Editing branch"
+            onPress={() => setBranchSheet(true)}
+          />
         </View>
+        <BranchPickerSheet
+          visible={branchSheet}
+          branches={branches}
+          selectedId={branchId}
+          onSelect={(id) => id && setBranchId(id)}
+          onClose={() => setBranchSheet(false)}
+        />
         {branch ? (
           <>
             <SwitchRow
@@ -291,45 +333,97 @@ export default function AdminSettingsScreen() {
           </>
         ) : null}
 
-        {/* Developer */}
-        <SectionTitle>Developer</SectionTitle>
-        <Pressable
-          onPress={() => router.push("/admin/preview-loading")}
-          className="mb-2 flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3"
-        >
-          <Text className="text-sm text-textPrimary">Preview loading screen</Text>
-          <Ionicons name="play-circle-outline" size={20} color={Colors.brand} />
-        </Pressable>
+        </Group>
 
-        {/* Audit */}
-        {audit.length > 0 ? (
-          <>
-            <SectionTitle>Recent changes</SectionTitle>
-            <View className="rounded-card border border-line bg-surface">
-              {audit.map((a, i) => (
-                <View
-                  key={a.id}
-                  className={`px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}
-                >
-                  <Text className="text-sm font-medium text-textPrimary">{a.setting}</Text>
-                  <Text className="text-xs text-textMuted">
-                    {a.old_value ?? "—"} → {a.new_value ?? "—"} · {formatDateTime(a.changed_at)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </>
-        ) : null}
+        <Group icon="construct-outline" title="Advanced" summary="Developer tools & change history">
+          <Pressable
+            onPress={() => router.push("/admin/preview-loading")}
+            className="mb-2 flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3"
+          >
+            <Text className="text-sm text-textPrimary">Preview loading screen</Text>
+            <Ionicons name="play-circle-outline" size={20} color={Colors.brand} />
+          </Pressable>
+
+          {audit.length > 0 ? (
+            <>
+              <Text className="mb-2 mt-4 text-xs font-semibold uppercase tracking-widest text-textMuted">
+                Recent changes
+              </Text>
+              <View className="rounded-card border border-line bg-surface">
+                {audit.map((a, i) => (
+                  <View key={a.id} className={`px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}>
+                    <Text className="text-sm font-medium text-textPrimary">{a.setting}</Text>
+                    <Text className="text-xs text-textMuted">
+                      {a.old_value ?? "—"} → {a.new_value ?? "—"} · {formatDateTime(a.changed_at)}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </Group>
       </ScrollView>
+
+      {/* Sticky save — only when there are unsaved app-settings changes */}
+      {dirty ? (
+        <View
+          style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}
+          className="flex-row gap-3 border-t border-line bg-surface px-5 pb-6 pt-3"
+        >
+          <Pressable
+            onPress={() => setSettings(original)}
+            accessibilityRole="button"
+            className="flex-1 items-center justify-center rounded-2xl border border-line bg-surface py-4"
+          >
+            <Text className="text-sm font-bold text-textSecondary">Discard</Text>
+          </Pressable>
+          <View className="flex-[2]">
+            <SaveButton label="Save changes" onPress={save} loading={saving} />
+          </View>
+        </View>
+      ) : null}
     </Screen>
   );
 }
 
-function SectionTitle({ children }: { children: ReactNode }) {
+function Group({
+  icon,
+  title,
+  summary,
+  defaultOpen,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <Text className="mb-2 mt-6 text-xs font-semibold uppercase tracking-widest text-textMuted">
-      {children}
-    </Text>
+    <View className="mb-3 overflow-hidden rounded-card border border-line bg-surface">
+      <Pressable
+        onPress={() => setOpen((o) => !o)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${title}${summary ? `, ${summary}` : ""}`}
+        className="flex-row items-center gap-3 px-4 py-3.5"
+      >
+        <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
+          <Ionicons name={icon} size={18} color={Colors.brand} />
+        </View>
+        <View className="flex-1">
+          <Text className="font-heading text-sm text-textPrimary">{title}</Text>
+          {summary ? (
+            <Text className="text-xs text-textMuted" numberOfLines={1}>
+              {summary}
+            </Text>
+          ) : null}
+        </View>
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={18} color={Colors.textMuted} />
+      </Pressable>
+      {open ? <View className="border-t border-line px-4 pb-3 pt-3">{children}</View> : null}
+    </View>
   );
 }
 

@@ -32,7 +32,8 @@ import {
   verifyStatutoryDiscount,
 } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
-import { formatDateTime, formatEta, peso, pickupOrRef, statusLabel } from "@/lib/format";
+import { formatDateTime, formatEta, peso, pickupOrRef } from "@/lib/format";
+import { orderStatusLabel, orderStatusTone } from "@/lib/orderStatus";
 import { mapOrderError } from "@/lib/orderErrors";
 import type { Order, OrderStatus } from "@/types/models";
 
@@ -228,16 +229,8 @@ export default function StaffOrderScreen() {
             {formatDateTime(order.created_at)}
           </Text>
           <Badge
-            label={statusLabel(order.status)}
-            tone={
-              order.status === "cancelled"
-                ? "red"
-                : order.status === "completed"
-                  ? "green"
-                  : order.status === "ready"
-                    ? "blue"
-                    : "amber"
-            }
+            label={orderStatusLabel(order.status, "staff")}
+            tone={orderStatusTone(order.status)}
           />
         </View>
 
@@ -276,7 +269,7 @@ export default function StaffOrderScreen() {
             </View>
           </View>
         ) : (
-          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-green-200 bg-successSoft p-3">
+          <View className="mt-3 flex-row items-center gap-2 rounded-xl border border-success bg-successSoft p-3">
             <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
             <Text className="text-sm font-semibold text-success">
               Paid · {order.payment_method}
@@ -473,7 +466,7 @@ export default function StaffOrderScreen() {
               onChangeText={setCancelReason}
               onFocus={handleFocus}
               placeholder={reasonRequired ? "Reason (required)" : "Reason (optional)"}
-              placeholderTextColor="#B8A99C"
+              placeholderTextColor={Colors.textMuted}
               multiline
               maxLength={200}
               textAlignVertical="top"
@@ -510,7 +503,7 @@ export default function StaffOrderScreen() {
               <Pressable
                 onPress={doConfirmCash}
                 disabled={busy || needsVerify}
-                className={`mb-2 flex-row items-center justify-center gap-2 rounded-2xl border border-green-300 bg-successSoft py-3 ${
+                className={`mb-2 flex-row items-center justify-center gap-2 rounded-2xl border border-success bg-successSoft py-3 ${
                   needsVerify ? "opacity-40" : ""
                 }`}
               >

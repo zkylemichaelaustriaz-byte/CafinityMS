@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
 import { Header } from "@/components/ui/Header";
 import { Screen } from "@/components/ui/Screen";
 import { Colors, shadow } from "@/constants/theme";
@@ -30,6 +31,7 @@ function startOf(period: Period): Date {
 export default function AdminCancellationsScreen() {
   const [period, setPeriod] = useState<Period>("month");
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [branchSheet, setBranchSheet] = useState(false);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [cancellations, setCancellations] = useState<CancellationRow[]>([]);
   const [orders, setOrders] = useState<ReportOrder[]>([]);
@@ -94,31 +96,23 @@ export default function AdminCancellationsScreen() {
           ))}
         </View>
 
-        {/* Branch filter */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerClassName="gap-2"
-          className="mb-4"
-        >
-          {[{ id: "all", name: "All branches" }, ...branches].map((b) => {
-            const id = b.id === "all" ? null : b.id;
-            const active = branchId === id;
-            return (
-              <Pressable
-                key={b.id}
-                onPress={() => setBranchId(id)}
-                className={`h-9 justify-center rounded-full px-4 ${active ? "bg-brandPrimary" : "border border-line bg-surface"}`}
-              >
-                <Text
-                  className={`text-sm font-semibold ${active ? "text-white" : "text-textSecondary"}`}
-                >
-                  {b.name}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        {/* Branch selector */}
+        <View className="mb-4">
+          <BranchSelectorField
+            branch={branches.find((b) => b.id === branchId) ?? null}
+            showAll
+            label="Branch"
+            onPress={() => setBranchSheet(true)}
+          />
+        </View>
+        <BranchPickerSheet
+          visible={branchSheet}
+          branches={branches}
+          selectedId={branchId}
+          allowAll
+          onSelect={setBranchId}
+          onClose={() => setBranchSheet(false)}
+        />
 
         {/* Metrics */}
         <View className="flex-row gap-2">
@@ -209,14 +203,14 @@ function Stat({ label, value }: { label: string; value: string }) {
 function RefundChip({ status, amount }: { status: string; amount: number }) {
   if (status === "refunded") {
     return (
-      <View className="rounded-full bg-green-100 px-2 py-0.5">
+      <View className="rounded-full bg-successSoft px-2 py-0.5">
         <Text className="text-[10px] font-semibold text-success">Refunded {peso(amount)}</Text>
       </View>
     );
   }
   if (status === "refund_pending") {
     return (
-      <View className="rounded-full bg-amber-100 px-2 py-0.5">
+      <View className="rounded-full bg-warningSoft px-2 py-0.5">
         <Text className="text-[10px] font-semibold text-warning">Return {peso(amount)}</Text>
       </View>
     );

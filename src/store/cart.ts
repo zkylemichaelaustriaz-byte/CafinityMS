@@ -20,6 +20,8 @@ interface CartState {
   duplicateLine: (lineId: string) => void;
   /** Re-insert a line at a position (used to undo a removal). */
   insertLineAt: (line: CartLine, index: number) => void;
+  /** Point the cart at a new branch WITHOUT clearing it (conflicts resolved in the cart). */
+  rebaseBranch: (branchId: string) => void;
   clear: () => void;
   /** Lazily create (and persist) the checkout token for this cart. */
   ensureCheckoutId: () => string;
@@ -73,6 +75,8 @@ export const useCart = create<CartState>()(
         const at = Math.max(0, Math.min(index, lines.length));
         set({ lines: [...lines.slice(0, at), line, ...lines.slice(at)] });
       },
+
+      rebaseBranch: (branchId) => set({ branchId }),
 
       clear: () => set({ lines: [], branchId: null, checkoutId: null }),
 

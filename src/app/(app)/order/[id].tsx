@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   Text,
@@ -17,6 +18,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { ActionSheet, type SheetAction } from "@/components/ui/ActionSheet";
 import { Header } from "@/components/ui/Header";
 import { useKeyboardAwareScroll } from "@/components/ui/KeyboardAwareScrollView";
 import { OrderProgress } from "@/components/ui/OrderProgress";
@@ -37,6 +39,7 @@ import {
   submitFeedback,
 } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
+import { tagsForRating } from "@/lib/feedbackTags";
 import {
   formatDateTime,
   formatEta,
@@ -46,6 +49,8 @@ import {
   statusLabel,
 } from "@/lib/format";
 import { notifyLocal } from "@/lib/notify";
+import { orderStatusTone } from "@/lib/orderStatus";
+import { useNetwork } from "@/store/network";
 import type { Order, OrderStatus } from "@/types/models";
 
 export default function OrderScreen() {
@@ -57,10 +62,13 @@ export default function OrderScreen() {
   const [loading, setLoading] = useState(true);
   const [ordersAhead, setOrdersAhead] = useState<number | null>(null);
   const [stepsExpanded, setStepsExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const online = useNetwork((s) => s.online);
   const prevStatus = useRef<OrderStatus | null>(null);
 
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [feedbackDone, setFeedbackDone] = useState(false);
   const [savingFeedback, setSavingFeedback] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -91,6 +99,7 @@ export default function OrderScreen() {
         if (fb) {
           setRating(fb.rating);
           setComment(fb.comment);
+          setTags(fb.tags);
           setFeedbackDone(true);
         }
       }
@@ -143,7 +152,7 @@ export default function OrderScreen() {
     if (!order || rating === 0) return;
     setSavingFeedback(true);
     try {
-      await submitFeedback(order.id, rating, comment.trim());
+      await submitFeedback(order.id, rating, comment.trim(), tags);
       setFeedbackDone(true);
     } catch (e) {
       void e;
@@ -200,12 +209,50 @@ export default function OrderScreen() {
     Date.now() - new Date(order.created_at).getTime() < cancelPolicy.windowMin * 60000;
   const canSelfCancel =
     cancelPolicy.policy !== "disabled" && order.status === "pending" && withinWindow;
+  const isTerminal = order.status === "completed" || cancelled;
+
+  // Secondary actions live in an overflow menu so the screen has one clear focus.
+  const menuActions: SheetAction[] = [];
+  if (!cancelled) {
+    menuActions.push({
+      label: "View digital receipt",
+      icon: "receipt-outline",
+      onPress: () => router.push(`/receipt/${order.id}`),
+    });
+  }
+  menuActions.push({
+    label: "Get help",
+    icon: "help-buoy-outline",
+    onPress: () =>
+      Linking.openURL(
+        `mailto:support@cafinity.app?subject=${encodeURIComponent(
+          `Help with order ${order.order_number ?? order.id}`,
+        )}`,
+      ).catch(() => {}),
+  });
+  if (canSelfCancel) {
+    menuActions.push({
+      label: "Cancel order",
+      icon: "close-circle-outline",
+      destructive: true,
+      onPress: () => setCancelOpen(true),
+    });
+  }
 
   return (
     <Screen edges={["top"]}>
       <Header
         title="Order details"
         onBack={() => (isNew ? router.replace("/orders") : router.back())}
+        right={
+          <Pressable
+            onPress={() => setMenuOpen(true)}
+            hitSlop={10}
+            accessibilityLabel="More options"
+          >
+            <Ionicons name="ellipsis-vertical" size={20} color={Colors.text} />
+          </Pressable>
+        }
       />
       <ScrollView
         ref={scrollRef}
@@ -242,23 +289,21 @@ export default function OrderScreen() {
                 {pickupNumber(order) ?? order.order_number ?? "—"}
               </Text>
             </View>
-            <Badge
-              label={statusLabel(order.status)}
-              tone={
-                cancelled
-                  ? "red"
-                  : order.status === "completed"
-                    ? "green"
-                    : isReady
-                      ? "blue"
-                      : "amber"
-              }
-            />
+            <Badge label={statusLabel(order.status)} tone={orderStatusTone(order.status)} />
           </View>
           <Text className="mt-1 text-xs text-textMuted">
             {order.order_number ? `Ref ${order.order_number} · ` : ""}Placed{" "}
             {formatDateTime(order.created_at)}
           </Text>
+
+          {!online && !isTerminal ? (
+            <View className="mt-2 flex-row items-center gap-1.5">
+              <Ionicons name="cloud-offline-outline" size={13} color={Colors.textMuted} />
+              <Text className="text-[11px] text-textMuted">
+                You&apos;re offline — showing the last known status.
+              </Text>
+            </View>
+          ) : null}
 
           {!cancelled ? (
             <>
@@ -346,9 +391,9 @@ export default function OrderScreen() {
           <View
             className={`mt-4 flex-row items-center gap-2 rounded-xl border p-3 ${
               order.discount_verification === "verified"
-                ? "border-green-200 bg-successSoft"
+                ? "border-success bg-successSoft"
                 : order.discount_verification === "rejected"
-                  ? "border-red-200 bg-dangerSoft"
+                  ? "border-danger bg-dangerSoft"
                   : "border-warning bg-warningSoft"
             }`}
           >
@@ -511,22 +556,11 @@ export default function OrderScreen() {
           </View>
         ) : null}
 
-        {/* Customer cancellation (policy-gated, only while still pending) */}
-        {canSelfCancel ? (
+        {/* Customer cancellation form — opened from the overflow menu */}
+        {canSelfCancel && cancelOpen ? (
           <View className="mt-4">
-            {!cancelOpen ? (
-              <>
-                <Button
-                  label="Cancel order"
-                  variant="danger"
-                  onPress={() => setCancelOpen(true)}
-                />
-                <Text className="mt-1.5 text-center text-xs text-textMuted">
-                  You can cancel until the barista starts preparing it.
-                </Text>
-              </>
-            ) : (
-              <View className="rounded-card border border-line bg-surface p-4">
+            {
+              <View className="rounded-card border border-danger bg-surface p-4">
                 <Text className="mb-1 font-heading text-sm text-textPrimary">
                   Cancel this order?
                 </Text>
@@ -544,7 +578,7 @@ export default function OrderScreen() {
                   onChangeText={setCancelReason}
                   onFocus={handleFocus}
                   placeholder={cancelPolicy.reasonRequired ? "Reason (required)" : "Reason (optional)"}
-                  placeholderTextColor="#B8A99C"
+                  placeholderTextColor={Colors.textMuted}
                   multiline
                   maxLength={200}
                   textAlignVertical="top"
@@ -571,29 +605,7 @@ export default function OrderScreen() {
                   </View>
                 </View>
               </View>
-            )}
-          </View>
-        ) : null}
-
-        {/* Reorder */}
-        {(order.order_items ?? []).length > 0 ? (
-          <View className="mt-5">
-            <Button
-              label="Reorder these items"
-              variant="outline"
-              onPress={() => router.push(`/reorder/${order.id}`)}
-            />
-          </View>
-        ) : null}
-
-        {/* Digital receipt */}
-        {!cancelled ? (
-          <View className="mt-3">
-            <Button
-              label="View digital receipt"
-              variant="outline"
-              onPress={() => router.push(`/receipt/${order.id}`)}
-            />
+            }
           </View>
         ) : null}
 
@@ -606,7 +618,11 @@ export default function OrderScreen() {
                 <Pressable
                   key={n}
                   disabled={feedbackDone}
-                  onPress={() => setRating(n)}
+                  onPress={() => {
+                    setRating(n);
+                    // Offered tags depend on the rating; drop ones no longer relevant.
+                    setTags((t) => t.filter((k) => tagsForRating(n).some((x) => x.key === k)));
+                  }}
                   hitSlop={6}
                   accessibilityLabel={`${n} star${n > 1 ? "s" : ""}`}
                 >
@@ -618,6 +634,39 @@ export default function OrderScreen() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Quick tags (positive for 4–5★, issue-focused for 1–3★) */}
+            {rating > 0 ? (
+              <View className="mt-3 flex-row flex-wrap gap-2">
+                {tagsForRating(rating).map((t) => {
+                  const on = tags.includes(t.key);
+                  if (feedbackDone && !on) return null;
+                  return (
+                    <Pressable
+                      key={t.key}
+                      disabled={feedbackDone}
+                      onPress={() =>
+                        setTags((cur) =>
+                          cur.includes(t.key) ? cur.filter((k) => k !== t.key) : [...cur, t.key],
+                        )
+                      }
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                      className={`rounded-full border px-3 py-1.5 ${
+                        on ? "border-brandPrimary bg-accent-100" : "border-line bg-surface"
+                      }`}
+                    >
+                      <Text
+                        className={`text-xs font-semibold ${on ? "text-brandPrimary" : "text-textSecondary"}`}
+                      >
+                        {t.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+
             {!feedbackDone ? (
               <>
                 <TextInput
@@ -625,7 +674,7 @@ export default function OrderScreen() {
                   onChangeText={setComment}
                   onFocus={handleFocus}
                   placeholder="Tell us how it was (optional)"
-                  placeholderTextColor="#B8A99C"
+                  placeholderTextColor={Colors.textMuted}
                   multiline
                   className="mt-3 min-h-[56px] rounded-xl border border-line bg-background px-3 py-2 text-sm text-textPrimary"
                 />
@@ -645,16 +694,25 @@ export default function OrderScreen() {
           </View>
         ) : null}
 
-        {isNew ? (
-          <View className="mt-5">
+        {/* One status-based primary action (terminal orders → reorder) */}
+        {isTerminal && (order.order_items ?? []).length > 0 ? (
+          <View className="mt-6">
             <Button
-              label="Back to home"
-              variant="outline"
-              onPress={() => router.replace("/home")}
+              label="Reorder these items"
+              onPress={() => router.push(`/reorder/${order.id}`)}
+              haptic="light"
+              leftIcon={<Ionicons name="repeat" size={18} color="#fff" />}
             />
           </View>
         ) : null}
       </ScrollView>
+
+      <ActionSheet
+        visible={menuOpen}
+        title="Order options"
+        actions={menuActions}
+        onClose={() => setMenuOpen(false)}
+      />
     </Screen>
   );
 }

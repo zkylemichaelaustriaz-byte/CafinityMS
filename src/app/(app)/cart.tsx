@@ -11,9 +11,11 @@ import { QuantityStepper } from "@/components/ui/QuantityStepper";
 import { Screen } from "@/components/ui/Screen";
 import { StickyActionBar } from "@/components/ui/StickyActionBar";
 import { Colors } from "@/constants/theme";
+import { getMenu } from "@/lib/api";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { lineTotal } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { MAX_ITEM_QUANTITY } from "@/lib/limits";
 import { resolveProductImage } from "@/lib/productMedia";
 import { useBranch } from "@/store/branch";
 import { cartSubtotal, useCart } from "@/store/cart";
@@ -34,6 +36,44 @@ export default function CartScreen() {
   const duplicateLine = useCart((s) => s.duplicateLine);
   const insertLineAt = useCart((s) => s.insertLineAt);
   const activeKey = useSeasonalTheme((s) => s.activeKey);
+
+  // Branch availability: product → orderable + the set of available variant ids
+  // at the SELECTED branch, used to flag cart items not available there.
+  const [availMap, setAvailMap] = useState<Map<
+    string,
+    { orderable: boolean; variants: Set<string> }
+  > | null>(null);
+
+  useEffect(() => {
+    if (!branch) return;
+    let alive = true;
+    setAvailMap(null);
+    getMenu(branch.id)
+      .then((menu) => {
+        if (!alive) return;
+        const map = new Map<string, { orderable: boolean; variants: Set<string> }>();
+        for (const p of menu) {
+          map.set(p.id, {
+            orderable: p.orderable,
+            variants: new Set(p.variants.filter((v) => v.is_available).map((v) => v.id)),
+          });
+        }
+        setAvailMap(map);
+      })
+      .catch(() => setAvailMap(null));
+    return () => {
+      alive = false;
+    };
+  }, [branch]);
+
+  // A non-seasonal line is unavailable when its product/variant isn't orderable
+  // at the selected branch (seasonal locking is handled separately).
+  function unavailableAtBranch(line: CartLine): boolean {
+    if (!availMap || isLineLocked(line, activeKey)) return false;
+    const entry = availMap.get(line.productId);
+    if (!entry || !entry.orderable) return true;
+    return !entry.variants.has(line.variantId);
+  }
 
   // Undo affordance for removals: keep the removed line + its position briefly.
   const [undo, setUndo] = useState<{ line: CartLine; index: number } | null>(null);
@@ -68,6 +108,8 @@ export default function CartScreen() {
 
   const subtotal = cartSubtotal(lines);
   const hasLocked = lines.some((l) => isLineLocked(l, activeKey));
+  const hasUnavailable = lines.some((l) => unavailableAtBranch(l));
+  const hasBlocked = hasLocked || hasUnavailable;
 
   if (lines.length === 0) {
     return (
@@ -103,13 +145,25 @@ export default function CartScreen() {
           </View>
         ) : null}
 
+        {hasUnavailable ? (
+          <View className="mb-3 flex-row items-start gap-2 rounded-2xl border border-danger bg-dangerSoft px-3 py-2.5">
+            <Ionicons name="alert-circle" size={16} color={Colors.danger} />
+            <Text className="flex-1 text-xs font-medium text-danger">
+              Some items aren&apos;t available at {branch?.name ?? "this branch"}. Edit or remove the
+              highlighted items to continue.
+            </Text>
+          </View>
+        ) : null}
+
         {lines.map((line) => {
           const locked = isLineLocked(line, activeKey);
+          const unavailable = unavailableAtBranch(line);
+          const blocked = locked || unavailable;
           return (
           <View
             key={line.lineId}
             className={`mb-3 flex-row rounded-card border bg-surface p-3 ${
-              locked ? "border-danger" : "border-line"
+              blocked ? "border-danger" : "border-line"
             }`}
           >
             <ProductImage
@@ -118,7 +172,7 @@ export default function CartScreen() {
                 line.presentationKey,
               )}
               emoji="☕"
-              className={`h-20 w-20 rounded-xl ${locked ? "opacity-50" : ""}`}
+              className={`h-20 w-20 rounded-xl ${blocked ? "opacity-50" : ""}`}
               emojiSize={30}
               accessibilityLabel={line.productName}
             />
@@ -139,13 +193,15 @@ export default function CartScreen() {
                       >
                         <Ionicons name="create-outline" size={18} color={Colors.brand} />
                       </Pressable>
-                      <Pressable
-                        onPress={() => handleDuplicate(line)}
-                        hitSlop={8}
-                        accessibilityLabel={`Duplicate ${line.productName}`}
-                      >
-                        <Ionicons name="copy-outline" size={17} color={Colors.brand} />
-                      </Pressable>
+                      {!unavailable ? (
+                        <Pressable
+                          onPress={() => handleDuplicate(line)}
+                          hitSlop={8}
+                          accessibilityLabel={`Duplicate ${line.productName}`}
+                        >
+                          <Ionicons name="copy-outline" size={17} color={Colors.brand} />
+                        </Pressable>
+                      ) : null}
                     </>
                   ) : null}
                   <Pressable
@@ -162,6 +218,11 @@ export default function CartScreen() {
                   This seasonal item is no longer available under the current campaign. Remove it to
                   continue.
                 </Text>
+              ) : unavailable ? (
+                <Text className="mt-0.5 text-xs font-medium text-danger">
+                  Not available at {branch?.name ?? "this branch"}. Edit to choose another option, or
+                  remove it.
+                </Text>
               ) : null}
               <Text className="text-xs text-textSecondary">{line.variantName}</Text>
               {line.selectedOptions.length > 0 ? (
@@ -177,6 +238,7 @@ export default function CartScreen() {
                 <QuantityStepper
                   value={line.quantity}
                   onChange={(q) => updateQuantity(line.lineId, q)}
+                  max={MAX_ITEM_QUANTITY}
                   size="sm"
                 />
                 <PriceText amount={lineTotal(line)} size="md" />
@@ -217,16 +279,20 @@ export default function CartScreen() {
           <Text className="text-sm text-textSecondary">Subtotal</Text>
           <PriceText amount={subtotal} size="lg" />
         </View>
-        {hasLocked ? (
+        {hasBlocked ? (
           <Text className="mb-2 text-center text-xs font-medium text-danger">
-            Remove the unavailable seasonal item to continue.
+            {hasLocked && hasUnavailable
+              ? "Remove the unavailable items to continue."
+              : hasLocked
+                ? "Remove the unavailable seasonal item to continue."
+                : `Some items aren't available at ${branch?.name ?? "this branch"}. Remove them to continue.`}
           </Text>
         ) : null}
         <Button
           label="Proceed to checkout"
           onPress={() => router.push("/checkout")}
           haptic="light"
-          disabled={hasLocked}
+          disabled={hasBlocked}
         />
       </StickyActionBar>
     </Screen>

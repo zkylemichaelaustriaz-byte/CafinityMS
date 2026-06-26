@@ -21,9 +21,11 @@ import { brandingImages } from "@/lib/brandingImages";
 import {
   getCancellationsSince,
   getFeedbackList,
+  getLowStockSummary,
   getOrdersSince,
   type CancellationRow,
   type FeedbackRow,
+  type LowStockSummary,
   type ReportOrder,
 } from "@/lib/api";
 import { computeCancelStats } from "@/lib/cancellationStats";
@@ -145,10 +147,13 @@ export default function AdminReportsScreen() {
   const [orders, setOrders] = useState<ReportOrder[]>([]);
   const [feedback, setFeedback] = useState<FeedbackRow[]>([]);
   const [cancellations, setCancellations] = useState<CancellationRow[]>([]);
+  const [lowStock, setLowStock] = useState<LowStockSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [period, setPeriod] = useState<Period>("today");
+  const [chartTab, setChartTab] = useState<"revenue" | "orders">("revenue");
+  const [showAllSellers, setShowAllSellers] = useState(false);
   const [heroFailed, setHeroFailed] = useState(false);
 
   const load = useCallback(async () => {
@@ -157,14 +162,16 @@ export default function AdminReportsScreen() {
       // Reach back to the start of last month so the period-over-period
       // comparison and the 7-day trend chart always have their data.
       const earliest = prevStartOf("month");
-      const [o, f, c] = await Promise.all([
+      const [o, f, c, ls] = await Promise.all([
         getOrdersSince(earliest.toISOString()),
         getFeedbackList(100),
         getCancellationsSince(earliest.toISOString()),
+        getLowStockSummary().catch(() => null),
       ]);
       setOrders(o);
       setFeedback(f);
       setCancellations(c);
+      setLowStock(ls);
     } catch (e) {
       setError(humanizeError(e, "Could not load reports."));
     } finally {
@@ -390,30 +397,44 @@ export default function AdminReportsScreen() {
             />
           </View>
 
-          {/* Revenue trend — area chart, bucketed to match the selected period */}
+          {/* Analytics — one section; Revenue/Orders shown one at a time */}
           <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
-            <Text className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-textMuted">
-              Revenue · {PERIOD_SUFFIX[period]}
-            </Text>
-            {stats.revenue === 0 ? (
-              <Text className="py-6 text-center text-xs text-textMuted">
-                No revenue in this period yet.
+            <View className="mb-3 flex-row items-center justify-between">
+              <View className="flex-row rounded-xl bg-surfaceMuted p-1">
+                {(["revenue", "orders"] as const).map((t) => (
+                  <Pressable
+                    key={t}
+                    onPress={() => setChartTab(t)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: chartTab === t }}
+                    className={`rounded-lg px-3 py-1.5 ${chartTab === t ? "bg-surface" : ""}`}
+                    style={chartTab === t ? shadow.card : undefined}
+                  >
+                    <Text
+                      className={`text-xs font-semibold ${chartTab === t ? "text-brandPrimary" : "text-textMuted"}`}
+                    >
+                      {t === "revenue" ? "Revenue" : "Orders"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text className="text-[11px] font-semibold uppercase tracking-widest text-textMuted">
+                {PERIOD_SUFFIX[period]}
               </Text>
-            ) : (
-              <AnalyticsChart
-                data={revenuePoints}
-                kind="area"
-                accessibilityLabel={`Revenue chart, ${PERIOD_SUFFIX[period]}. Total ${peso(stats.revenue)}.`}
-              />
-            )}
-          </View>
-
-          {/* Order volume — rounded bars, same period */}
-          <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
-            <Text className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-textMuted">
-              Orders · {PERIOD_SUFFIX[period]}
-            </Text>
-            {ordersInPeriod === 0 ? (
+            </View>
+            {chartTab === "revenue" ? (
+              stats.revenue === 0 ? (
+                <Text className="py-6 text-center text-xs text-textMuted">
+                  No revenue in this period yet.
+                </Text>
+              ) : (
+                <AnalyticsChart
+                  data={revenuePoints}
+                  kind="area"
+                  accessibilityLabel={`Revenue chart, ${PERIOD_SUFFIX[period]}. Total ${peso(stats.revenue)}.`}
+                />
+              )
+            ) : ordersInPeriod === 0 ? (
               <Text className="py-6 text-center text-xs text-textMuted">
                 No orders in this period yet.
               </Text>
@@ -437,20 +458,44 @@ export default function AdminReportsScreen() {
             <Text className="flex-1 text-sm font-medium text-textPrimary">{insight.text}</Text>
           </View>
 
-          {/* Quick actions */}
-          <View className="mt-3 flex-row gap-3">
+          {/* Low-stock summary */}
+          {lowStock ? (
+            <LowStockCard summary={lowStock} onPress={() => router.push("/admin/inventory")} />
+          ) : null}
+
+          {/* Quick actions — 2-column grid (roomier than four narrow tiles) */}
+          <View className="mt-3 flex-row flex-wrap gap-3">
+            <QuickAction icon="bar-chart-outline" label="Reports" onPress={() => router.push("/admin/reports")} />
             <QuickAction icon="add-circle-outline" label="Add product" onPress={() => router.push("/admin/product/new")} />
             <QuickAction icon="cube-outline" label="Inventory" onPress={() => router.push("/admin/inventory")} />
             <QuickAction icon="megaphone-outline" label="Campaigns" onPress={() => router.push("/admin/campaigns")} />
           </View>
 
-          {/* Top sellers */}
-          <Text className="mb-2 mt-6 font-heading text-lg text-textPrimary">Top sellers</Text>
+          {/* Top sellers — first 3, expandable */}
+          <View className="mb-2 mt-6 flex-row items-center justify-between">
+            <Text className="font-heading text-lg text-textPrimary">Top sellers</Text>
+            {stats.top.length > 3 ? (
+              <Pressable
+                onPress={() => setShowAllSellers((v) => !v)}
+                accessibilityRole="button"
+                className="flex-row items-center gap-1"
+              >
+                <Text className="text-xs font-semibold text-brandPrimary">
+                  {showAllSellers ? "Show less" : "View all"}
+                </Text>
+                <Ionicons
+                  name={showAllSellers ? "chevron-up" : "chevron-down"}
+                  size={14}
+                  color={Colors.brand}
+                />
+              </Pressable>
+            ) : null}
+          </View>
           {stats.top.length === 0 ? (
             <Empty text="No sales in this period yet." />
           ) : (
             <View className="rounded-card border border-line bg-surface">
-              {stats.top.map((p, i) => (
+              {(showAllSellers ? stats.top : stats.top.slice(0, 3)).map((p, i) => (
                 <View
                   key={p.name}
                   className={`flex-row items-center px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}
@@ -473,7 +518,17 @@ export default function AdminReportsScreen() {
           )}
 
           {/* Feedback */}
-          <Text className="mb-2 mt-6 font-heading text-lg text-textPrimary">Recent feedback</Text>
+          <Pressable
+            onPress={() => router.push("/admin/feedback")}
+            accessibilityRole="button"
+            className="mb-2 mt-6 flex-row items-center justify-between"
+          >
+            <Text className="font-heading text-lg text-textPrimary">Recent feedback</Text>
+            <View className="flex-row items-center gap-1">
+              <Text className="text-xs font-semibold text-brandPrimary">View all</Text>
+              <Ionicons name="chevron-forward" size={14} color={Colors.brand} />
+            </View>
+          </Pressable>
           {ratings.list.length === 0 ? (
             <Empty text="No feedback in this period." />
           ) : (
@@ -552,13 +607,92 @@ function QuickAction({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      className="flex-1 items-center gap-1.5 rounded-card border border-line bg-surface py-3"
+      className="w-[48%] flex-row items-center gap-2 rounded-card border border-line bg-surface px-3 py-3.5"
       style={shadow.card}
     >
       <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
         <Ionicons name={icon} size={18} color={Colors.brand} />
       </View>
-      <Text className="text-[11px] font-semibold text-textSecondary">{label}</Text>
+      <Text className="flex-1 text-xs font-semibold text-textSecondary" numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function StockStat({ label, value, tone }: { label: string; value: number; tone: "red" | "amber" }) {
+  return (
+    <View className="flex-1 items-center rounded-xl border border-line bg-surfaceMuted py-2">
+      <Text className={`font-display text-xl ${tone === "red" ? "text-danger" : "text-warning"}`}>
+        {value}
+      </Text>
+      <Text className="text-[11px] text-textMuted">{label}</Text>
+    </View>
+  );
+}
+
+function LowStockCard({
+  summary,
+  onPress,
+}: {
+  summary: LowStockSummary;
+  onPress: () => void;
+}) {
+  const total = summary.out + summary.critical + summary.low;
+  if (total === 0) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel="Inventory healthy. Open inventory."
+        className="mt-3 flex-row items-center gap-2 rounded-card border border-line bg-surface p-4"
+        style={shadow.card}
+      >
+        <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+        <Text className="flex-1 text-sm font-medium text-textPrimary">All inventory healthy</Text>
+        <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+      </Pressable>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Low stock: ${summary.out} out, ${summary.critical} critical, ${summary.low} low. Open inventory.`}
+      className="mt-3 rounded-card border border-line bg-surface p-4"
+      style={shadow.card}
+    >
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center gap-2">
+          <Ionicons name="alert-circle" size={18} color={Colors.warning} />
+          <Text className="font-heading text-base text-textPrimary">Low stock</Text>
+        </View>
+        <Text className="text-xs font-medium text-textMuted">
+          {summary.affectedBranches} branch{summary.affectedBranches === 1 ? "" : "es"} affected
+        </Text>
+      </View>
+      <View className="mt-3 flex-row gap-2">
+        <StockStat label="Out" value={summary.out} tone="red" />
+        <StockStat label="Critical" value={summary.critical} tone="red" />
+        <StockStat label="Low" value={summary.low} tone="amber" />
+      </View>
+      <View className="mt-3 gap-1.5">
+        {summary.items.slice(0, 3).map((it, i) => (
+          <View key={i} className="flex-row items-center gap-2">
+            <View
+              style={{ backgroundColor: it.status === "low" ? Colors.warning : Colors.danger }}
+              className="h-1.5 w-1.5 rounded-full"
+            />
+            <Text className="flex-1 text-xs text-textSecondary" numberOfLines={1}>
+              {it.product_name} ({it.variant_name}) · {it.branch_name}
+            </Text>
+            <Text className="text-xs font-semibold text-textMuted">{it.stock} left</Text>
+          </View>
+        ))}
+        <Text className="mt-0.5 text-xs font-semibold text-brandPrimary">
+          {summary.items.length > 3 ? `+${summary.items.length - 3} more · ` : ""}View inventory
+        </Text>
+      </View>
     </Pressable>
   );
 }

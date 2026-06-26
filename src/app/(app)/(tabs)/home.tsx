@@ -10,6 +10,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
+import { BranchSelectorField } from "@/components/ui/BranchSelector";
 import { BranchWorkload } from "@/components/ui/BranchWorkload";
 import { CampaignAd } from "@/components/ui/CampaignAd";
 import { NotificationBell } from "@/components/ui/NotificationBell";
@@ -27,6 +28,7 @@ import { resolveProductImage } from "@/lib/productMedia";
 import { useSeasonalTheme } from "@/store/seasonalTheme";
 import {
   getActiveCampaign,
+  getActiveSeasonalAd,
   getCategories,
   getMenu,
   getOrders,
@@ -40,13 +42,11 @@ import { humanizeError } from "@/lib/errors";
 import { formatEta, pickupOrRef, statusLabel } from "@/lib/format";
 import { useAuth } from "@/store/auth";
 import { useBranch } from "@/store/branch";
+import { campaignSession } from "@/store/campaignSession";
 import { useFavorites } from "@/store/favorites";
 import type { Campaign, Category, MenuProduct, Order, OrderStatus, Reward } from "@/types/models";
 
 const ACTIVE: OrderStatus[] = ["pending", "preparing", "ready"];
-
-// Show the seasonal campaign at most once per app session.
-let campaignShownThisSession = false;
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -141,19 +141,28 @@ export default function HomeScreen() {
     setRefreshing(false);
   }
 
-  // Show the seasonal campaign once per session, but never over an active order.
+  // Show the seasonal ad once per LOGIN session (re-armed on sign-in/out), but
+  // never over an active order. Prefer the non-frequency-gated active campaign so
+  // the current season always appears; fall back to the RPC if that returns
+  // nothing. Only consume the once-per-session flag once an ad actually loads, so
+  // a transient empty/failed fetch never suppresses the ad.
+  const campaignTried = useRef(false);
   useEffect(() => {
-    if (campaignShownThisSession || loading || active) return;
-    campaignShownThisSession = true;
-    getActiveCampaign()
-      .then((c) => {
-        if (!c) return;
-        setCampaign(c);
-        recordCampaignView(c.id).then((id) => {
+    if (campaignTried.current || !campaignSession.shouldShow() || loading || active) return;
+    campaignTried.current = true;
+    void (async () => {
+      const c =
+        (await getActiveSeasonalAd().catch(() => null)) ??
+        (await getActiveCampaign().catch(() => null));
+      if (!c) return;
+      campaignSession.markShown();
+      setCampaign(c);
+      recordCampaignView(c.id)
+        .then((id) => {
           impressionId.current = id;
-        });
-      })
-      .catch(() => {});
+        })
+        .catch(() => {});
+    })();
   }, [loading, active]);
 
   function dismissCampaign() {
@@ -216,29 +225,15 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Branch selector */}
-        <AnimatedPressable
-          onPress={() => router.push("/branches")}
-          className="mx-5 mb-5 flex-row items-center rounded-2xl border border-line bg-surface px-4 py-3"
-        >
-          <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
-            <Ionicons name="location" size={18} color={Colors.brand} />
-          </View>
-          <View className="ml-3 flex-1">
-            <Text className="text-[11px] font-medium uppercase tracking-wide text-textMuted">
-              {branch ? "Pickup at" : "Choose your branch"}
-            </Text>
-            <Text className="text-sm font-bold text-textPrimary" numberOfLines={1}>
-              {branch ? branch.name : "Tap to select a branch"}
-            </Text>
-            {branch ? (
-              <View className="mt-0.5">
-                <BranchWorkload branchId={branch.id} />
-              </View>
-            ) : null}
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#C9A47C" />
-        </AnimatedPressable>
+        {/* Branch selector (shared location-style field → geolocation picker) */}
+        <View className="mx-5 mb-5">
+          <BranchSelectorField
+            branch={branch}
+            onPress={() => router.push("/branches")}
+            placeholder="Select a branch"
+            extra={branch ? <BranchWorkload branchId={branch.id} /> : null}
+          />
+        </View>
 
         {/* Active order banner — live status kept near the top.
             Ready-for-pickup gets a stronger, filled treatment. */}

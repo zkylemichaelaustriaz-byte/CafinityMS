@@ -1,6 +1,7 @@
 import { forwardRef, useState } from "react";
 import { Pressable, Text, TextInput, View, type TextInputProps } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Colors } from "@/constants/theme";
 
 interface FieldProps extends TextInputProps {
   label?: string;
@@ -38,7 +39,7 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
       <View className="justify-center">
         <TextInput
           ref={ref}
-          placeholderTextColor="#B8A99C"
+          placeholderTextColor={Colors.textMuted}
           secureTextEntry={secure}
           onFocus={(e) => {
             setFocused(true);

@@ -17,6 +17,7 @@ import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { humanizeError } from "@/lib/errors";
 import { formatDateTime, formatEta, pickupOrRef, statusLabel } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
+import { orderStatusTone } from "@/lib/orderStatus";
 import { localProductImage } from "@/lib/productImages";
 import type { Order, OrderStatus } from "@/types/models";
 
@@ -29,13 +30,6 @@ function railColor(status: OrderStatus): string {
   if (status === "completed") return Colors.success;
   if (status === "cancelled") return Colors.danger;
   return Colors.info;
-}
-function chipTone(status: OrderStatus): "red" | "green" | "blue" | "amber" | "gray" {
-  if (status === "cancelled") return "red";
-  if (status === "completed") return "green";
-  if (status === "ready") return "green";
-  if (status === "preparing") return "amber";
-  return "blue";
 }
 function itemCount(o: Order): number {
   return (o.order_items ?? []).reduce((n, i) => n + (i.quantity ?? 1), 0);
@@ -281,7 +275,7 @@ function ActiveOrderCard({ order, onTrack }: { order: Order; onTrack: () => void
           <Text className="font-display text-lg text-textPrimary">
             {pickupOrRef(order)}
           </Text>
-          <Badge label={statusLabel(order.status)} tone={chipTone(order.status)} />
+          <Badge label={statusLabel(order.status)} tone={orderStatusTone(order.status)} />
         </View>
         <Text className="mt-0.5 text-xs text-textMuted">
           {order.branches?.name ?? ""} · {itemCount(order)} item
@@ -325,7 +319,7 @@ function CompactOrderRow({
           <Text className="font-display text-base text-textPrimary">
             {pickupOrRef(order)}
           </Text>
-          <Badge label={statusLabel(order.status)} tone={chipTone(order.status)} />
+          <Badge label={statusLabel(order.status)} tone={orderStatusTone(order.status)} />
         </View>
         <Text className="text-xs text-textMuted">
           {formatDateTime(order.created_at)} · {order.branches?.name ?? ""}
