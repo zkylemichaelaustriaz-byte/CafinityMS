@@ -225,9 +225,12 @@ export default function StaffQueueScreen() {
     const q = query.trim().toLowerCase();
     if (q) list = list.filter((o) => (o.order_number ?? "").toLowerCase().includes(q));
 
+    // Deterministic ordering by effective time: scheduled orders sort by their
+    // pickup time, immediate orders by creation — so a far-future scheduled order
+    // never jumps ahead of current immediate FIFO orders.
     return [...list].sort((a, b) => {
-      const ta = new Date(a.created_at).getTime();
-      const tb = new Date(b.created_at).getTime();
+      const ta = new Date(a.scheduled_for ?? a.created_at).getTime();
+      const tb = new Date(b.scheduled_for ?? b.created_at).getTime();
       return sort === "fifo" ? ta - tb : tb - ta;
     });
   }, [inBranch, query, filter, sort]);
@@ -410,6 +413,11 @@ export default function StaffQueueScreen() {
           renderItem={({ item }) => {
             const action = nextAction(item.status);
             const wait = waitMinutes(item.created_at, now);
+            // Scheduled-order gating: a future scheduled order isn't actionable
+            // until ~20 min before its pickup time (so it doesn't get prepped early).
+            const scheduledMs = item.scheduled_for ? new Date(item.scheduled_for).getTime() : null;
+            const notDue =
+              scheduledMs != null && item.status === "pending" && now < scheduledMs - 20 * 60_000;
             const itemCount = (item.order_items ?? []).reduce((n, i) => n + i.quantity, 0);
             const urgency = item.status === "ready" ? "normal" : urgencyOf(wait);
             // Past its promised ready time while still preparing = running late.
@@ -456,6 +464,17 @@ export default function StaffQueueScreen() {
                     ) : null}
                   </View>
                   <View className="flex-row items-center gap-1.5">
+                    {scheduledMs != null ? (
+                      <View className="flex-row items-center gap-0.5 rounded-full bg-accent-100 px-2 py-0.5">
+                        <Ionicons name="calendar-outline" size={9} color={Colors.brand} />
+                        <Text className="text-[10px] font-bold text-brandPrimary">
+                          {new Date(scheduledMs).toLocaleTimeString("en-PH", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </Text>
+                      </View>
+                    ) : null}
                     {delayed ? (
                       <View className="rounded-full bg-dangerSoft px-2 py-0.5">
                         <Text className="text-[10px] font-bold text-danger">Delayed</Text>
@@ -563,6 +582,11 @@ export default function StaffQueueScreen() {
                       <View className="flex-row items-center gap-1.5 rounded-xl bg-surfaceMuted px-3.5 py-2.5 opacity-60">
                         <Text className="text-sm font-bold text-textMuted">Start</Text>
                       </View>
+                    </View>
+                  ) : notDue ? (
+                    <View className="flex-row items-center gap-1.5 rounded-xl bg-surfaceMuted px-3 py-2.5">
+                      <Ionicons name="time-outline" size={14} color={Colors.textMuted} />
+                      <Text className="text-xs font-semibold text-textMuted">Scheduled</Text>
                     </View>
                   ) : action ? (
                     <AnimatedPressable

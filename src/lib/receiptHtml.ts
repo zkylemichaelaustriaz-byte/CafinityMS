@@ -1,4 +1,5 @@
 import { formatDateTime, peso, pickupNumber, statusLabel } from "@/lib/format";
+import { formatScheduled } from "@/lib/scheduling";
 import type { Order } from "@/types/models";
 
 export interface ReceiptOptions {
@@ -204,6 +205,7 @@ export function buildReceiptHtml(order: Order, o: ReceiptOptions): string {
     <div class="meta">
       ${order.order_number ? `<div class="r"><span>Reference</span><b>${esc(order.order_number)}</b></div>` : ""}
       <div class="r"><span>Date</span><b>${esc(formatDateTime(order.created_at))}</b></div>
+      ${order.scheduled_for ? `<div class="r"><span>Scheduled pickup</span><b>${esc(formatScheduled(order.scheduled_for))}</b></div>` : ""}
       <div class="r"><span>Status</span><b>${esc(statusLabel(order.status))}</b></div>
     </div>
     <div class="items">${items}</div>

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { Button } from "@/components/ui/Button";
+import { SchedulePickupSheet } from "@/components/checkout/SchedulePickupSheet";
 import { Header } from "@/components/ui/Header";
 import { PriceText } from "@/components/ui/PriceText";
 import { ProductImage } from "@/components/ui/ProductImage";
@@ -13,11 +14,21 @@ import { StickyActionBar } from "@/components/ui/StickyActionBar";
 import { useKeyboardAwareScroll } from "@/components/ui/KeyboardAwareScrollView";
 import { Colors } from "@/constants/theme";
 import { useKeyboardVisible } from "@/hooks/useKeyboardVisible";
-import { getAppSettings, getAvailableVouchers, placeOrder, previewPromo, quoteOrder } from "@/lib/api";
+import {
+  getAppSettings,
+  getAvailableVouchers,
+  getBranches,
+  placeOrder,
+  previewPromo,
+  quoteOrder,
+  setOrderSchedule,
+} from "@/lib/api";
+import { branchStatusLabel, isBranchOpen } from "@/lib/branchHours";
 import { isOnline, useNetwork } from "@/store/network";
 import { getEmptyStateImage } from "@/lib/emptyStateImages";
 import { classifyError, humanizeError } from "@/lib/errors";
 import { formatDateTime, formatEta, lineTotal, peso } from "@/lib/format";
+import { formatScheduled, generatePickupDays } from "@/lib/scheduling";
 import { resolveProductImage } from "@/lib/productMedia";
 import { useAuth } from "@/store/auth";
 import { useBranch } from "@/store/branch";
@@ -34,6 +45,14 @@ function voucherDiscount(v: RewardRedemption, subtotal: number): number {
 }
 
 type Method = "GCash" | "Cash";
+
+/** Where an actionable checkout error points the customer to fix it. */
+type ErrorTarget = "branch" | "schedule" | "cart";
+const ERROR_ACTION_LABEL: Record<ErrorTarget, string> = {
+  branch: "Change branch",
+  schedule: "Review pickup time",
+  cart: "Review cart",
+};
 
 export default function CheckoutScreen() {
   const router = useRouter();
@@ -63,13 +82,51 @@ export default function CheckoutScreen() {
   const [customTip, setCustomTip] = useState("");
   const [notes, setNotes] = useState("");
   const [placing, setPlacing] = useState(false);
+  // Scheduled pickup ("asap" = immediate). A scheduled ISO is only set from the
+  // valid slot list, so an invalid time can never be chosen.
+  const [scheduleMode, setScheduleMode] = useState<"asap" | "later">("asap");
+  const [scheduledIso, setScheduledIso] = useState<string | null>(null);
+  const [scheduleSheet, setScheduleSheet] = useState(false);
   // Network-uncertain state: the order MAY have been created. Retrying is safe
   // (idempotent via checkout_request_id), so we offer "check status" not "pay again".
   const [verifying, setVerifying] = useState(false);
   const online = useNetwork((s) => s.online);
   const [error, setError] = useState<string | null>(null);
+  // Actionable errors: a blocking message shown above Pay can carry a button that
+  // jumps to the section that resolves it (target → branch / pickup time / cart).
+  const [errorAction, setErrorAction] = useState<ErrorTarget | null>(null);
   const keyboardVisible = useKeyboardVisible();
   const { scrollRef, handleFocus } = useKeyboardAwareScroll();
+  const pickupSectionY = useRef(0);
+
+  // Set a blocking error, optionally with a "jump to the fix" action target.
+  function fail(message: string, target?: ErrorTarget) {
+    setError(message);
+    setErrorAction(target ?? null);
+  }
+
+  function resolveError() {
+    if (errorAction === "branch") {
+      router.push("/branches");
+    } else if (errorAction === "cart") {
+      router.push("/cart");
+    } else if (errorAction === "schedule") {
+      scrollRef.current?.scrollTo({ y: Math.max(0, pickupSectionY.current - 16), animated: true });
+    }
+  }
+
+  const pickupDays = useMemo(() => generatePickupDays(branch), [branch]);
+  const branchOpen = branch ? isBranchOpen(branch.opening_time, branch.closing_time) : false;
+  const [branchActive, setBranchActive] = useState(true);
+
+  // Revalidate the selected branch is still ACTIVE (a persisted branch may have
+  // been deactivated by an admin since it was chosen).
+  useEffect(() => {
+    if (!branch) return;
+    getBranches()
+      .then((list) => setBranchActive(list.some((b) => b.id === branch.id)))
+      .catch(() => {});
+  }, [branch]);
 
   const [quote, setQuote] = useState<OrderQuote | null>(null);
 
@@ -146,6 +203,23 @@ export default function CheckoutScreen() {
     };
   }, [branch, lines, appliedCode, statutory, tipAmount]);
 
+  // Clear a blocking error once the customer changes anything that could resolve
+  // it, which re-enables the Pay button (it's disabled while an error stands).
+  useEffect(() => {
+    setError(null);
+    setErrorAction(null);
+  }, [
+    scheduleMode,
+    scheduledIso,
+    branchActive,
+    branchOpen,
+    method,
+    gcashBalance,
+    statutory,
+    holderName,
+    idNumber,
+  ]);
+
   async function applyPromo() {
     setPromoError(null);
     if (!promoInput.trim()) return;
@@ -192,34 +266,60 @@ export default function CheckoutScreen() {
 
   async function onPlaceOrder() {
     setError(null);
+    setErrorAction(null);
     if (!branch || lines.length === 0) return;
 
     if (!isOnline()) {
-      setError("You're offline. Connect to the internet to place your order — your cart is saved.");
+      fail("You're offline. Connect to the internet to place your order — your cart is saved.");
+      return;
+    }
+
+    if (scheduleMode === "later" && !scheduledIso) {
+      fail("Choose a pickup date and time, or switch to “As soon as possible”.", "schedule");
+      return;
+    }
+
+    if (!branchActive) {
+      fail(
+        "This branch is no longer available. Your cart is saved — please choose another branch.",
+        "branch",
+      );
+      return;
+    }
+
+    // Immediate orders require an OPEN branch. Scheduled slots are already valid
+    // future in-hours times, so they're allowed even while currently closed.
+    if (scheduleMode === "asap" && !branchOpen) {
+      fail(
+        "This branch is currently closed. Your cart has been saved — choose “Schedule for later” for an available time, or pick another branch.",
+        "schedule",
+      );
       return;
     }
 
     if (cartBranchId && cartBranchId !== branch.id) {
-      setError(
+      fail(
         "Your cart was started at a different branch. Go back to the cart and review it before checking out.",
+        "cart",
       );
       return;
     }
 
     if (lines.some((l) => l.isSeasonal && l.collectionKey !== activeSeasonalKey)) {
-      setError(
+      fail(
         "A seasonal item in your cart is no longer available under the current campaign. Go back to the cart and remove it to continue.",
+        "cart",
       );
       return;
     }
 
     if (statutory) {
       if (method !== "Cash") {
-        setError("PWD/Senior discounts are Cash-only. Switch payment to Cash.");
+        fail("PWD/Senior discounts are Cash-only. Switch payment to Cash.");
         return;
       }
       if (!holderName.trim() || !idNumber.trim()) {
-        setError("Enter the cardholder name and ID number for the PWD/Senior discount.");
+        fail("Enter the cardholder name and ID number for the PWD/Senior discount.");
         return;
       }
     }
@@ -227,7 +327,7 @@ export default function CheckoutScreen() {
     if (method === "GCash") {
       const balance = Number(gcashBalance) || 0;
       if (balance < total) {
-        setError(
+        fail(
           `Transaction Failed — your GCash balance (${peso(balance)}) is less than the total (${peso(total)}). Your cart was kept.`,
         );
         return;
@@ -257,6 +357,11 @@ export default function CheckoutScreen() {
         idNumber: statutory ? idNumber.trim() : null,
         tip: tipAmount,
       });
+      // Attach the schedule right after placement (best-effort; order is placed
+      // either way). Immediate orders stay null.
+      if (scheduleMode === "later" && scheduledIso) {
+        await setOrderSchedule(result.order_id, scheduledIso).catch(() => {});
+      }
       setVerifying(false);
       clearCart();
       void refreshProfile();
@@ -310,7 +415,11 @@ export default function CheckoutScreen() {
       >
         {/* Pickup */}
         {branch ? (
-          <View className="mb-5 flex-row items-center rounded-card border border-line bg-surface p-4">
+          <View
+            className={`mb-5 flex-row items-center rounded-card border bg-surface p-4 ${
+              !branchActive ? "border-danger" : !branchOpen ? "border-warning" : "border-line"
+            }`}
+          >
             <View className="h-10 w-10 items-center justify-center rounded-full bg-accent-100">
               <Ionicons name="location" size={18} color={Colors.brand} />
             </View>
@@ -319,14 +428,122 @@ export default function CheckoutScreen() {
                 Pickup at
               </Text>
               <Text className="text-sm font-bold text-textPrimary">{branch.name}</Text>
-              {etaLabel ? (
+              {!branchActive ? (
+                <Text className="mt-0.5 text-xs font-semibold text-danger">
+                  No longer available — choose another branch
+                </Text>
+              ) : (
+                <View className="mt-0.5 flex-row items-center gap-1">
+                  <Ionicons
+                    name={branchOpen ? "ellipse" : "moon-outline"}
+                    size={branchOpen ? 9 : 11}
+                    color={branchOpen ? Colors.success : Colors.warning}
+                  />
+                  <Text className={`text-xs font-medium ${branchOpen ? "text-success" : "text-warning"}`}>
+                    {branchStatusLabel(branch)}
+                  </Text>
+                </View>
+              )}
+              {etaLabel && branchOpen && branchActive ? (
                 <Text className="mt-0.5 text-xs font-semibold text-brandPrimary">
                   Ready in {etaLabel} after it&apos;s started
                 </Text>
               ) : null}
             </View>
+            <Pressable onPress={() => router.push("/branches")} hitSlop={8} accessibilityLabel="Change branch">
+              <Text className="text-xs font-semibold text-brandPrimary">Change</Text>
+            </Pressable>
           </View>
         ) : null}
+
+        {/* Pickup time — As soon as possible / Schedule for later */}
+        <View
+          className="mb-5"
+          onLayout={(e) => {
+            pickupSectionY.current = e.nativeEvent.layout.y;
+          }}
+        >
+          <Text className="mb-2 font-heading text-base text-textPrimary">Pickup time</Text>
+          <View className="gap-2">
+            <Pressable
+              onPress={() => {
+                setScheduleMode("asap");
+                setScheduledIso(null);
+              }}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: scheduleMode === "asap" }}
+              className={`flex-row items-center rounded-card border p-3.5 ${
+                scheduleMode === "asap" ? "border-brandPrimary bg-accent-100" : "border-line bg-surface"
+              }`}
+            >
+              <Ionicons name="flash-outline" size={18} color={Colors.brand} />
+              <View className="ml-3 flex-1">
+                <Text className="text-sm font-bold text-textPrimary">As soon as possible</Text>
+                <Text className={`text-xs ${branch && !branchOpen ? "text-warning" : "text-textSecondary"}`}>
+                  {branch && !branchOpen
+                    ? "Branch is closed — schedule a time instead"
+                    : etaLabel
+                      ? `Estimated ${etaLabel} once started`
+                      : "Prepared right after you order"}
+                </Text>
+              </View>
+              <Ionicons
+                name={scheduleMode === "asap" ? "radio-button-on" : "radio-button-off"}
+                size={20}
+                color={scheduleMode === "asap" ? Colors.brand : "#C9A47C"}
+              />
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                if (pickupDays.length === 0) return;
+                setScheduleMode("later");
+                // Open the compact date→time sheet; if a time is already chosen,
+                // just re-select the mode (the summary card below offers Change).
+                if (!scheduledIso) setScheduleSheet(true);
+              }}
+              disabled={pickupDays.length === 0}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: scheduleMode === "later" }}
+              className={`flex-row items-center rounded-card border p-3.5 ${
+                scheduleMode === "later" ? "border-brandPrimary bg-accent-100" : "border-line bg-surface"
+              } ${pickupDays.length === 0 ? "opacity-50" : ""}`}
+            >
+              <Ionicons name="calendar-outline" size={18} color={Colors.brand} />
+              <View className="ml-3 flex-1">
+                <Text className="text-sm font-bold text-textPrimary">Schedule for later</Text>
+                <Text className="text-xs text-textSecondary">
+                  {pickupDays.length === 0
+                    ? "Not available for this branch"
+                    : "Choose an available date and time"}
+                </Text>
+              </View>
+              <Ionicons
+                name={scheduleMode === "later" ? "radio-button-on" : "radio-button-off"}
+                size={20}
+                color={scheduleMode === "later" ? Colors.brand : "#C9A47C"}
+              />
+            </Pressable>
+          </View>
+
+          {/* Confirmed-schedule summary — compact, with a Change affordance. */}
+          {scheduleMode === "later" && scheduledIso ? (
+            <View className="mt-2 flex-row items-center rounded-card border border-brandPrimary bg-accent-100 p-3.5">
+              <Ionicons name="time-outline" size={18} color={Colors.brand} />
+              <View className="ml-3 flex-1">
+                <Text className="text-sm font-bold text-textPrimary">{formatScheduled(scheduledIso)}</Text>
+                <Text className="text-xs text-textSecondary">{branch?.name ?? "Selected branch"}</Text>
+              </View>
+              <Pressable
+                onPress={() => setScheduleSheet(true)}
+                hitSlop={8}
+                accessibilityLabel="Change pickup time"
+              >
+                <Text className="text-xs font-semibold text-brandPrimary">Change</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
 
         {/* Order summary */}
         <View className="mb-2 flex-row items-center justify-between">
@@ -609,12 +826,6 @@ export default function CheckoutScreen() {
           className="min-h-[72px] rounded-2xl border border-line bg-surface px-4 py-3 text-base text-textPrimary"
         />
         <Text className="mt-1 self-end text-[11px] text-textMuted">{notes.length}/300</Text>
-
-        {error ? (
-          <View className="mt-5 rounded-xl bg-dangerSoft p-3">
-            <Text className="text-sm font-medium text-danger">{error}</Text>
-          </View>
-        ) : null}
       </ScrollView>
 
       {keyboardVisible ? null : (
@@ -672,6 +883,23 @@ export default function CheckoutScreen() {
             <Text className="text-xs text-brandPrimary">Earn {pointsToEarn} pts</Text>
           </View>
         </View>
+        {/* Blocking error sits directly above Pay, so the cause and the action it
+            blocks are never separated. Actionable errors jump to their section. */}
+        {error && !verifying ? (
+          <View className="mb-3 flex-row items-start gap-2 rounded-2xl border border-danger bg-dangerSoft px-3 py-2.5">
+            <Ionicons name="alert-circle" size={18} color={Colors.danger} />
+            <View className="flex-1">
+              <Text className="text-sm font-medium text-danger">{error}</Text>
+              {errorAction ? (
+                <Pressable onPress={resolveError} hitSlop={6} className="mt-1.5 self-start">
+                  <Text className="text-sm font-bold text-danger underline">
+                    {ERROR_ACTION_LABEL[errorAction]}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
         {verifying ? (
           <View className="rounded-2xl border border-info bg-infoSoft p-3">
             <View className="flex-row items-center gap-2">
@@ -704,12 +932,30 @@ export default function CheckoutScreen() {
             label={online ? `Pay & place order · ${peso(total)}` : "Offline — connect to order"}
             onPress={onPlaceOrder}
             loading={placing}
-            disabled={!online}
+            disabled={!online || !!error}
             haptic="success"
           />
         )}
       </StickyActionBar>
       )}
+
+      <SchedulePickupSheet
+        visible={scheduleSheet}
+        days={pickupDays}
+        branchName={branch?.name ?? "this branch"}
+        initialIso={scheduledIso}
+        onClose={() => {
+          setScheduleSheet(false);
+          // Closing without a chosen time leaves "later" unfulfilled — fall back
+          // to ASAP so checkout isn't stuck in an incomplete scheduled state.
+          if (!scheduledIso) setScheduleMode("asap");
+        }}
+        onConfirm={(iso) => {
+          setScheduledIso(iso);
+          setScheduleMode("later");
+          setScheduleSheet(false);
+        }}
+      />
     </Screen>
   );
 }

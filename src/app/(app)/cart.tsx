@@ -66,14 +66,19 @@ export default function CartScreen() {
     };
   }, [branch]);
 
-  // A non-seasonal line is unavailable when its product/variant isn't orderable
-  // at the selected branch (seasonal locking is handled separately).
-  function unavailableAtBranch(line: CartLine): boolean {
-    if (!availMap || isLineLocked(line, activeKey)) return false;
+  // Classify a non-seasonal line's availability at the selected branch so we can
+  // show the exact reason (seasonal locking is handled separately). "product" =
+  // the product itself isn't orderable here; "variant" = that size/variant isn't.
+  // Quantity-vs-stock + concurrency is enforced atomically server-side by
+  // place_order, which rejects with an item-specific error at checkout.
+  function conflictReason(line: CartLine): "product" | "variant" | null {
+    if (!availMap || isLineLocked(line, activeKey)) return null;
     const entry = availMap.get(line.productId);
-    if (!entry || !entry.orderable) return true;
-    return !entry.variants.has(line.variantId);
+    if (!entry || !entry.orderable) return "product";
+    if (!entry.variants.has(line.variantId)) return "variant";
+    return null;
   }
+  const unavailableAtBranch = (line: CartLine): boolean => conflictReason(line) !== null;
 
   // Undo affordance for removals: keep the removed line + its position briefly.
   const [undo, setUndo] = useState<{ line: CartLine; index: number } | null>(null);
@@ -157,7 +162,8 @@ export default function CartScreen() {
 
         {lines.map((line) => {
           const locked = isLineLocked(line, activeKey);
-          const unavailable = unavailableAtBranch(line);
+          const reason = conflictReason(line);
+          const unavailable = reason !== null;
           const blocked = locked || unavailable;
           return (
           <View
@@ -218,10 +224,15 @@ export default function CartScreen() {
                   This seasonal item is no longer available under the current campaign. Remove it to
                   continue.
                 </Text>
-              ) : unavailable ? (
+              ) : reason === "variant" ? (
                 <Text className="mt-0.5 text-xs font-medium text-danger">
-                  Not available at {branch?.name ?? "this branch"}. Edit to choose another option, or
-                  remove it.
+                  {line.variantName} isn&apos;t available at {branch?.name ?? "this branch"}. Edit to
+                  choose another size, or remove it.
+                </Text>
+              ) : reason === "product" ? (
+                <Text className="mt-0.5 text-xs font-medium text-danger">
+                  This item isn&apos;t available at {branch?.name ?? "this branch"} right now. Remove
+                  it to continue.
                 </Text>
               ) : null}
               <Text className="text-xs text-textSecondary">{line.variantName}</Text>

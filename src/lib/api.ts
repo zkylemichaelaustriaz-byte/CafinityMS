@@ -705,6 +705,18 @@ export async function getOrderCustomer(
 }
 
 /** How many active orders are ahead of this one in its branch queue. */
+/** Attach (or clear with null) a scheduled pickup time on a pending order. */
+export async function setOrderSchedule(
+  orderId: string,
+  scheduledForISO: string | null,
+): Promise<void> {
+  const { error } = await supabase.rpc("set_order_schedule", {
+    p_order_id: orderId,
+    p_scheduled_for: scheduledForISO,
+  });
+  if (error) throw error;
+}
+
 export async function getOrdersAhead(orderId: string): Promise<number> {
   const { data, error } = await supabase.rpc("orders_ahead", { p_order_id: orderId });
   if (error) throw error;

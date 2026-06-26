@@ -238,6 +238,8 @@ export interface Order {
   /** Short per-branch, per-day pickup number (e.g. 42 → "#042"). Null for legacy. */
   display_queue_number?: number | null;
   business_date?: string | null;
+  /** Advance pickup time; null = immediate (ASAP) order. */
+  scheduled_for?: string | null;
   status: OrderStatus;
   subtotal: number;
   discount_amount: number;

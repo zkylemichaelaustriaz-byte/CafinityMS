@@ -50,6 +50,7 @@ import {
 } from "@/lib/format";
 import { notifyLocal } from "@/lib/notify";
 import { orderStatusTone } from "@/lib/orderStatus";
+import { formatScheduled } from "@/lib/scheduling";
 import { useNetwork } from "@/store/network";
 import type { Order, OrderStatus } from "@/types/models";
 
@@ -295,6 +296,15 @@ export default function OrderScreen() {
             {order.order_number ? `Ref ${order.order_number} · ` : ""}Placed{" "}
             {formatDateTime(order.created_at)}
           </Text>
+
+          {order.scheduled_for ? (
+            <View className="mt-2 flex-row items-center gap-1.5 self-start rounded-full bg-accent-100 px-3 py-1.5">
+              <Ionicons name="calendar-outline" size={13} color={Colors.brand} />
+              <Text className="text-xs font-bold text-brandPrimary">
+                Scheduled pickup · {formatScheduled(order.scheduled_for)}
+              </Text>
+            </View>
+          ) : null}
 
           {!online && !isTerminal ? (
             <View className="mt-2 flex-row items-center gap-1.5">

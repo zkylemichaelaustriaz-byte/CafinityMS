@@ -12,6 +12,7 @@ import { Colors } from "@/constants/theme";
 import { getOrder } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
 import { formatDateTime, peso, pickupNumber, statusLabel } from "@/lib/format";
+import { formatScheduled } from "@/lib/scheduling";
 import { haptics } from "@/lib/haptics";
 import {
   buildReceiptHtml,
@@ -240,6 +241,9 @@ export default function ReceiptScreen() {
               <MetaRow label="Reference" value={order.order_number} />
             ) : null}
             <MetaRow label="Date" value={formatDateTime(order.created_at)} />
+            {order.scheduled_for ? (
+              <MetaRow label="Scheduled pickup" value={formatScheduled(order.scheduled_for)} />
+            ) : null}
             <MetaRow label="Status" value={statusLabel(order.status)} />
           </View>
 

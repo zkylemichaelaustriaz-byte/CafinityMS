@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Pressable, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -54,6 +54,14 @@ export default function ProductScreen() {
   const [invalidGroupId, setInvalidGroupId] = useState<string | null>(null);
   const sectionY = useRef(0);
   const groupY = useRef<Record<string, number>>({});
+  // Persistent header: fade a solid bar + product title in once the hero (h-72 =
+  // 288px) has mostly scrolled past, so the Back control never disappears.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const headerReveal = scrollY.interpolate({
+    inputRange: [196, 260],
+    outputRange: [0, 1],
+    extrapolate: "clamp",
+  });
 
   function scrollToGroup(groupId: string) {
     const y = Math.max(0, sectionY.current + (groupY.current[groupId] ?? 0) - 16);
@@ -272,7 +280,12 @@ export default function ProductScreen() {
 
   return (
     <View className="flex-1 bg-background">
-      <KeyboardAwareScrollView ref={scrollRef} contentContainerClassName="pb-40">
+      <KeyboardAwareScrollView
+        ref={scrollRef}
+        contentContainerClassName="pb-40"
+        scrollEventThrottle={16}
+        onScroll={(e) => scrollY.setValue(e.nativeEvent.contentOffset.y)}
+      >
         {/* Hero — switches with Hot/Iced (expo-image crossfade, stable aspect) */}
         <View>
           <ProductImage
@@ -298,15 +311,6 @@ export default function ProductScreen() {
               <Text className="text-xs font-bold uppercase text-white">{presentation}</Text>
             </View>
           ) : null}
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityLabel="Go back"
-            style={{ top: insets.top + 8 }}
-            className="absolute left-4 h-10 w-10 items-center justify-center rounded-full bg-white/90"
-          >
-            {/* Fixed dark arrow — the circle is always white, even in dark mode */}
-            <Ionicons name="chevron-back" size={24} color="#231711" />
-          </Pressable>
         </View>
 
         <View
@@ -366,70 +370,82 @@ export default function ProductScreen() {
             </View>
           ) : null}
 
-          {/* Customization */}
+          {/* Customization — options are always visible (no extra taps to open) */}
           {product.groups.map((g) => {
             const invalid = invalidGroupId === g.id;
+            const single = g.selection_type === "single";
+            const chosen = (selections[g.id]?.length ?? 0) > 0;
             return (
-            <View
-              key={g.id}
-              className="mt-6"
-              onLayout={(e) => {
-                groupY.current[g.id] = e.nativeEvent.layout.y;
-              }}
-            >
-              <View className="mb-2 flex-row items-center gap-2">
-                <Text className="font-heading text-base text-textPrimary">{g.name}</Text>
-                <Text className={`text-xs ${invalid ? "font-semibold text-danger" : "text-textMuted"}`}>
-                  {g.selection_type === "single"
-                    ? invalid
-                      ? "Please choose one"
-                      : "Choose 1"
-                    : "Choose any"}
-                </Text>
-                {(selections[g.id]?.length ?? 0) > 0 ? (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={Colors.brand}
-                    style={{ marginLeft: "auto" }}
-                  />
-                ) : null}
-              </View>
               <View
-                className={`overflow-hidden rounded-2xl border bg-surface ${invalid ? "border-danger" : "border-line"}`}
+                key={g.id}
+                className="mt-7"
+                onLayout={(e) => {
+                  groupY.current[g.id] = e.nativeEvent.layout.y;
+                }}
               >
-                {g.options.map((o, idx) => {
-                  const sel = (selections[g.id] ?? []).includes(o.id);
-                  const single = g.selection_type === "single";
-                  const icon = single
-                    ? sel
-                      ? "radio-button-on"
-                      : "radio-button-off"
-                    : sel
-                      ? "checkbox"
-                      : "square-outline";
-                  return (
-                    <Pressable
-                      key={o.id}
-                      onPress={() => toggle(g, o.id)}
-                      className={`flex-row items-center justify-between px-4 py-3 ${
-                        idx > 0 ? "border-t border-line" : ""
-                      } ${sel ? "bg-accent-100" : ""}`}
+                <View className="mb-2.5 flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-2">
+                    <Text className="font-heading text-base text-textPrimary">{g.name}</Text>
+                    <View
+                      className={`rounded-full px-2 py-0.5 ${
+                        invalid ? "bg-dangerSoft" : "bg-surfaceMuted"
+                      }`}
                     >
-                      <Text className="text-base text-textPrimary">{o.name}</Text>
-                      <View className="flex-row items-center gap-3">
-                        {o.additional_price > 0 ? (
-                          <Text className="text-sm font-medium text-textSecondary">
-                            +{peso(o.additional_price)}
-                          </Text>
-                        ) : null}
-                        <Ionicons name={icon} size={20} color={sel ? Colors.brand : "#C9A47C"} />
-                      </View>
-                    </Pressable>
-                  );
-                })}
+                      <Text
+                        className={`text-[10px] font-semibold uppercase tracking-wide ${
+                          invalid ? "text-danger" : "text-textMuted"
+                        }`}
+                      >
+                        {single ? (invalid ? "Select one" : "Required") : "Optional"}
+                      </Text>
+                    </View>
+                  </View>
+                  {chosen ? (
+                    <Ionicons name="checkmark-circle" size={18} color={Colors.brand} />
+                  ) : null}
+                </View>
+                <View
+                  className={`overflow-hidden rounded-2xl border bg-surface ${
+                    invalid ? "border-danger" : "border-line"
+                  }`}
+                >
+                  {g.options.map((o, idx) => {
+                    const sel = (selections[g.id] ?? []).includes(o.id);
+                    const icon = single
+                      ? sel
+                        ? "radio-button-on"
+                        : "radio-button-off"
+                      : sel
+                        ? "checkbox"
+                        : "square-outline";
+                    return (
+                      <Pressable
+                        key={o.id}
+                        onPress={() => toggle(g, o.id)}
+                        accessibilityRole={single ? "radio" : "checkbox"}
+                        accessibilityState={{ selected: sel }}
+                        className={`flex-row items-center justify-between px-4 py-3.5 ${
+                          idx > 0 ? "border-t border-line" : ""
+                        } ${sel ? "bg-accent-100" : ""}`}
+                      >
+                        <Text
+                          className={`text-base ${sel ? "font-semibold text-textPrimary" : "text-textPrimary"}`}
+                        >
+                          {o.name}
+                        </Text>
+                        <View className="flex-row items-center gap-3">
+                          {o.additional_price > 0 ? (
+                            <Text className="text-sm font-medium text-textSecondary">
+                              +{peso(o.additional_price)}
+                            </Text>
+                          ) : null}
+                          <Ionicons name={icon} size={20} color={sel ? Colors.brand : "#C9A47C"} />
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
             );
           })}
 
@@ -505,6 +521,43 @@ export default function ProductScreen() {
           </View>
         </View>
       </KeyboardAwareScrollView>
+
+      {/* Persistent top bar — Back is always reachable; the solid surface + the
+          compact product name fade in once the hero scrolls away. box-none keeps
+          the transparent band scrollable; only the Back control captures taps. */}
+      <View
+        pointerEvents="box-none"
+        style={{ height: insets.top + 52 }}
+        className="absolute left-0 right-0 top-0"
+      >
+        <Animated.View
+          pointerEvents="none"
+          style={{ opacity: headerReveal }}
+          className="absolute inset-0 border-b border-line bg-surface"
+        />
+        <View
+          pointerEvents="box-none"
+          style={{ paddingTop: insets.top }}
+          className="flex-1 flex-row items-center px-4"
+        >
+          <Pressable
+            onPress={() => router.back()}
+            accessibilityLabel="Go back"
+            hitSlop={8}
+            className="h-10 w-10 items-center justify-center rounded-full bg-white/90"
+          >
+            {/* Fixed dark arrow — the circle is always white, even in dark mode */}
+            <Ionicons name="chevron-back" size={24} color="#231711" />
+          </Pressable>
+          <Animated.Text
+            numberOfLines={1}
+            style={{ opacity: headerReveal }}
+            className="ml-3 flex-1 font-heading text-base text-textPrimary"
+          >
+            {product.name}
+          </Animated.Text>
+        </View>
+      </View>
 
       {/* Sticky add-to-cart */}
       <View

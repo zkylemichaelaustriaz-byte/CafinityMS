@@ -2,6 +2,7 @@
   "expo": {
     "name": "Cafinity",
     "slug": "Cafinity",
+    "owner": "arkemis-team",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/cafinity-logo.png",
@@ -14,6 +15,7 @@
       }
     },
     "android": {
+      "package": "com.cafinity.app",
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#9c6b44",
@@ -69,6 +71,12 @@
     "experiments": {
       "typedRoutes": false,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "85d25658-ec08-43b1-a8f5-e0464ffae3b0"
+      }
     }
   }
 }
