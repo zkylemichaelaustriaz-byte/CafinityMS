@@ -1,20 +1,31 @@
-import { useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import Constants from "expo-constants";
 import { AppearanceToggle } from "@/components/ui/AppearanceToggle";
 import { AvatarPicker } from "@/components/ui/AvatarPicker";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
+import { getAdminSettings, getAllUsers, getBranches } from "@/lib/api";
 import { brandingImages } from "@/lib/brandingImages";
 import { presetByKey } from "@/lib/campaignPresets";
 import { formatDateTime } from "@/lib/format";
 import { seasonalSwatch } from "@/theme/seasonal";
 import { useAuth } from "@/store/auth";
 import { useSeasonalTheme } from "@/store/seasonalTheme";
+
+interface ManageOverview {
+  branches: number;
+  customers: number;
+  baristas: number;
+  admins: number;
+  loyalty: string;
+  vat: string;
+}
 
 export default function AdminManageScreen() {
   const router = useRouter();
@@ -23,6 +34,38 @@ export default function AdminManageScreen() {
   const signOut = useAuth((s) => s.signOut);
   const activeKey = useSeasonalTheme((s) => s.activeKey);
   const [coverFailed, setCoverFailed] = useState(false);
+  const [overview, setOverview] = useState<ManageOverview | null>(null);
+  const appVersion = Constants.expoConfig?.version ?? "1.0.0";
+
+  // Compact, read-only system summary (no secrets/IDs). Derived from live data.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const [branches, users, settings] = await Promise.all([
+          getBranches(),
+          getAllUsers(),
+          getAdminSettings(),
+        ]);
+        if (!alive) return;
+        setOverview({
+          branches: branches.filter((b) => b.is_active).length,
+          customers: users.filter((u) => u.role === "customer").length,
+          baristas: users.filter((u) => u.role === "staff").length,
+          admins: users.filter((u) => u.role === "admin").length,
+          loyalty: `${settings.loyalty_points_awarded} pt${settings.loyalty_points_awarded === 1 ? "" : "s"} / ₱${settings.loyalty_spend_unit.toFixed(2)}`,
+          vat: settings.business_is_vat_registered
+            ? `Registered (${Math.round(settings.vat_rate * 100)}%)`
+            : "Not registered",
+        });
+      } catch {
+        if (alive) setOverview(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const fullName =
     `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim() || "Administrator";
@@ -55,7 +98,7 @@ export default function AdminManageScreen() {
         <Text className="font-display text-2xl text-textPrimary">Manage</Text>
       </View>
 
-      <View className="p-5 pt-1">
+      <ScrollView contentContainerClassName="p-5 pt-1 pb-10" showsVerticalScrollIndicator={false}>
         <View className="items-center overflow-hidden rounded-panel bg-brand-900 p-6">
           {!coverFailed ? (
             <Image
@@ -139,10 +182,41 @@ export default function AdminManageScreen() {
         </Text>
         <AppearanceToggle />
 
+        {/* System overview — compact, read-only (no secrets/IDs) */}
+        <Text className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-textMuted">
+          Overview
+        </Text>
+        <View className="overflow-hidden rounded-card border border-line bg-surface">
+          <OverviewRow label="Application version" value={`Cafinity ${appVersion}`} first />
+          <OverviewRow label="Active branches" value={overview ? String(overview.branches) : "—"} />
+          <OverviewRow
+            label="Accounts"
+            value={
+              overview
+                ? `${overview.customers} customers · ${overview.baristas} baristas · ${overview.admins} admins`
+                : "—"
+            }
+          />
+          <OverviewRow label="Active theme" value={themeName} />
+          <OverviewRow label="Loyalty earning" value={overview?.loyalty ?? "—"} />
+          <OverviewRow label="VAT" value={overview?.vat ?? "—"} />
+        </View>
+
         <View className="mt-6">
           <Button label="Sign out" variant="danger" onPress={confirmSignOut} />
         </View>
-      </View>
+      </ScrollView>
     </Screen>
+  );
+}
+
+function OverviewRow({ label, value, first }: { label: string; value: string; first?: boolean }) {
+  return (
+    <View className={`flex-row items-center justify-between px-4 py-3 ${first ? "" : "border-t border-line"}`}>
+      <Text className="text-sm text-textSecondary">{label}</Text>
+      <Text className="flex-1 pl-3 text-right text-sm font-semibold text-textPrimary" numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
   );
 }

@@ -15,6 +15,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { Badge } from "@/components/ui/Badge";
 import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
+import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { PriceText } from "@/components/ui/PriceText";
@@ -34,6 +35,7 @@ import { formatEta, pickupOrRef } from "@/lib/format";
 import { haptics } from "@/lib/haptics";
 import { mapOrderError } from "@/lib/orderErrors";
 import { orderStatusLabel, orderStatusTone } from "@/lib/orderStatus";
+import { useAuth } from "@/store/auth";
 import { useStaffPrefs } from "@/store/staffPrefs";
 import type { Branch, Order, OrderStatus } from "@/types/models";
 
@@ -105,6 +107,20 @@ export default function StaffQueueScreen() {
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevIds = useRef<Set<string>>(new Set());
   const seeded = useRef(false);
+
+  // Branch access: a barista is locked to their assigned branch unless an admin
+  // granted all-branch access. Enforced server-side too (RLS + trigger).
+  const profile = useAuth((s) => s.profile);
+  const profileLoaded = useAuth((s) => s.profileLoaded);
+  const signOut = useAuth((s) => s.signOut);
+  const allBranches = !!profile?.all_branches_access;
+  const assignedBranchId = profile?.branch_id ?? null;
+  const noAssignment = profileLoaded && !allBranches && !assignedBranchId;
+
+  // Single-branch baristas: pin the scope to their branch (no manual change).
+  useEffect(() => {
+    if (!allBranches && assignedBranchId) setBranchId(assignedBranchId);
+  }, [allBranches, assignedBranchId]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -268,6 +284,28 @@ export default function StaffQueueScreen() {
     }
   }
 
+  // No branch assigned (and not all-access) → no data access; show guidance.
+  if (noAssignment) {
+    return (
+      <Screen>
+        <View className="flex-1 items-center justify-center px-8">
+          <Ionicons name="business-outline" size={40} color={Colors.textMuted} />
+          <Text className="mt-3 text-center text-base font-bold text-textPrimary">
+            No branch assigned
+          </Text>
+          <Text className="mt-1 text-center text-sm text-textSecondary">
+            No branch has been assigned to your account. Ask an administrator to assign your branch,
+            then try again.
+          </Text>
+          <View className="mt-5 w-full gap-2">
+            <Button label="Retry" variant="outline" onPress={() => void load()} />
+            <Button label="Sign out" variant="danger" onPress={() => void signOut()} />
+          </View>
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       {/* Header */}
@@ -290,14 +328,31 @@ export default function StaffQueueScreen() {
         </AnimatedPressable>
       </View>
 
-      {/* Branch selector (location-style field — not a filter pill) */}
+      {/* Branch scope — selector for all-access staff, locked row otherwise */}
       <View className="px-5 py-2">
-        <BranchSelectorField
-          branch={branches.find((b) => b.id === branchId) ?? null}
-          showAll
-          label="Branch"
-          onPress={() => setBranchSheet(true)}
-        />
+        {allBranches ? (
+          <BranchSelectorField
+            branch={branches.find((b) => b.id === branchId) ?? null}
+            showAll
+            label="Branch"
+            onPress={() => setBranchSheet(true)}
+          />
+        ) : (
+          <View className="flex-row items-center gap-2 rounded-2xl border border-line bg-surfaceMuted px-4 py-3">
+            <Ionicons name="lock-closed" size={15} color={Colors.textMuted} />
+            <View className="flex-1">
+              <Text className="text-[11px] font-medium uppercase tracking-wide text-textMuted">
+                Assigned branch
+              </Text>
+              <Text className="text-sm font-bold text-textPrimary">
+                {branches.find((b) => b.id === assignedBranchId)?.name ??
+                  profile?.branch_name ??
+                  "Your branch"}
+              </Text>
+            </View>
+            <Text className="text-[11px] text-textMuted">Limited to this branch</Text>
+          </View>
+        )}
       </View>
 
       {/* Metrics */}
@@ -624,14 +679,16 @@ export default function StaffQueueScreen() {
         </View>
       ) : null}
 
-      <BranchPickerSheet
-        visible={branchSheet}
-        branches={branches}
-        selectedId={branchId}
-        allowAll
-        onSelect={setBranchId}
-        onClose={() => setBranchSheet(false)}
-      />
+      {allBranches ? (
+        <BranchPickerSheet
+          visible={branchSheet}
+          branches={branches}
+          selectedId={branchId}
+          allowAll
+          onSelect={setBranchId}
+          onClose={() => setBranchSheet(false)}
+        />
+      ) : null}
     </Screen>
   );
 }

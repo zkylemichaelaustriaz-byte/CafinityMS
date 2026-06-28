@@ -44,9 +44,24 @@ for (const acct of DEMO_ACCOUNTS) {
 const { data: allUsers } = await admin.from("users").select("role");
 const tally = (allUsers ?? []).reduce((a, u) => ((a[u.role] = (a[u.role] ?? 0) + 1), a), {});
 console.log("\nProject totals → customers:", tally.customer ?? 0, "· baristas:", tally.staff ?? 0, "· admins:", tally.admin ?? 0);
-console.log(
-  "Presentation target → 4 / 3 / 2 (a 5th customer is registered live).",
-);
+console.log("Presentation target → customers 5 · baristas 5 · admins 3  (13 total)");
+if ((tally.customer ?? 0) < 5 || (tally.staff ?? 0) < 5 || (tally.admin ?? 0) < 3) {
+  ok = false;
+  console.log("⚠ Role counts below target — run seed-demo-users.mjs.");
+}
+
+// Branch coverage: every active branch should have at least one barista.
+const { data: brAll } = await admin.from("branches").select("id, name, is_active");
+const active = (brAll ?? []).filter((b) => b.is_active);
+const { data: staffRows } = await admin.from("users").select("branch_id").eq("role", "staff");
+const covered = new Set((staffRows ?? []).map((s) => s.branch_id).filter(Boolean));
+const uncovered = active.filter((b) => !covered.has(b.id));
+console.log(`\nBranch coverage → ${active.length - uncovered.length}/${active.length} active branches have a barista.`);
+if (uncovered.length) {
+  ok = false;
+  console.log("⚠ Uncovered branches:", uncovered.map((b) => b.name).join(", "));
+}
+
 console.log("\nNote: passwords can't be verified from the service role — sign in from the app to confirm 123456.");
-console.log(ok ? "\n✔ All listed accounts present with correct role/branch." : "\n⚠ Some accounts need attention (run seed-demo-users.mjs).");
+console.log(ok ? "\n✔ Accounts present with correct role/branch and full branch coverage." : "\n⚠ Some items need attention (see warnings above).");
 process.exit(ok ? 0 : 1);

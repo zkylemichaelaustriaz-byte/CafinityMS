@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, type ReactNode } from "r
 import { useColorScheme } from "react-native";
 import { colorScheme as nwColorScheme } from "nativewind";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { applyScheme, applySeasonal, Colors, type ColorsShape } from "@/constants/theme";
 import { useAppearance, type AppearancePref } from "@/store/appearance";
@@ -52,6 +53,12 @@ export function AppThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     nwColorScheme.set(mode);
   }, [mode]);
+
+  // Paint the native root window background in the active theme so no light/dark
+  // edge shows around screens during a live appearance switch (no reload needed).
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(Colors.cream);
+  }, [mode, campaignKey]);
 
   const value = useMemo<ResolvedTheme>(
     () => ({ preference, mode, campaignKey, colors: Colors, setPreference }),

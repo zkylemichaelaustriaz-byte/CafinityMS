@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -96,6 +97,7 @@ export default function CheckoutScreen() {
   // jumps to the section that resolves it (target → branch / pickup time / cart).
   const [errorAction, setErrorAction] = useState<ErrorTarget | null>(null);
   const keyboardVisible = useKeyboardVisible();
+  const insets = useSafeAreaInsets();
   const { scrollRef, handleFocus } = useKeyboardAwareScroll();
   const pickupSectionY = useRef(0);
 
@@ -404,6 +406,13 @@ export default function CheckoutScreen() {
     <Screen edges={["top"]}>
       <Header title="Checkout" />
 
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        // iOS: pad the scroll area above the keyboard. Android relies on the
+        // window's adjustResize (app.json softwareKeyboardLayoutMode: "resize").
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={insets.top}
+      >
       <ScrollView
         ref={scrollRef}
         contentContainerClassName="p-5 pb-10"
@@ -411,7 +420,6 @@ export default function CheckoutScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets
       >
         {/* Pickup */}
         {branch ? (
@@ -818,6 +826,7 @@ export default function CheckoutScreen() {
           value={notes}
           onChangeText={setNotes}
           onFocus={handleFocus}
+          accessibilityLabel="Notes for barista"
           placeholder="Optional — e.g. name for the cup"
           placeholderTextColor={Colors.textMuted}
           multiline
@@ -827,6 +836,7 @@ export default function CheckoutScreen() {
         />
         <Text className="mt-1 self-end text-[11px] text-textMuted">{notes.length}/300</Text>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {keyboardVisible ? null : (
       <StickyActionBar>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Alert, StyleSheet, Switch, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { ReportGeneratorSheet } from "@/components/reports/ReportGeneratorSheet";
 import { AppearanceToggle } from "@/components/ui/AppearanceToggle";
 import { AvatarPicker } from "@/components/ui/AvatarPicker";
 import { Badge } from "@/components/ui/Badge";
@@ -9,7 +10,8 @@ import { Button } from "@/components/ui/Button";
 import { Header } from "@/components/ui/Header";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
-import { getStaffStats, type StaffStats } from "@/lib/api";
+import { getBranches, getStaffStats, type StaffStats } from "@/lib/api";
+import type { Branch } from "@/types/models";
 import { brandingImages } from "@/lib/brandingImages";
 import { formatDateTime, peso } from "@/lib/format";
 import { useAuth } from "@/store/auth";
@@ -23,12 +25,20 @@ export default function StaffAccountScreen() {
   const setHapticOnNewOrder = useStaffPrefs((s) => s.setHapticOnNewOrder);
   const [coverFailed, setCoverFailed] = useState(false);
   const [stats, setStats] = useState<StaffStats | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [branches, setBranches] = useState<Branch[]>([]);
 
   useEffect(() => {
     getStaffStats(null)
       .then(setStats)
       .catch(() => {});
-  }, []);
+    // All-access baristas can pick a branch in the report sheet.
+    if (profile?.all_branches_access) {
+      getBranches()
+        .then(setBranches)
+        .catch(() => {});
+    }
+  }, [profile?.all_branches_access]);
 
   const fullName =
     `${profile?.first_name ?? ""} ${profile?.last_name ?? ""}`.trim() || "Staff member";
@@ -55,7 +65,13 @@ export default function StaffAccountScreen() {
   return (
     <Screen edges={["top"]}>
       <Header title="Account" />
-      <View className="p-5">
+      <ReportGeneratorSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        mode="staff"
+        branches={branches}
+      />
+      <ScrollView contentContainerClassName="p-5" showsVerticalScrollIndicator={false}>
         <View className="items-center overflow-hidden rounded-panel bg-brand-900 p-6">
           {!coverFailed ? (
             <Image
@@ -112,6 +128,25 @@ export default function StaffAccountScreen() {
         ) : null}
 
         <Text className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-textMuted">
+          Reports
+        </Text>
+        <Pressable
+          onPress={() => setReportOpen(true)}
+          className="flex-row items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3.5"
+        >
+          <View className="h-9 w-9 items-center justify-center rounded-full bg-accent-100">
+            <Ionicons name="document-text-outline" size={18} color={Colors.brand} />
+          </View>
+          <View className="flex-1">
+            <Text className="text-sm font-semibold text-textPrimary">Branch report</Text>
+            <Text className="text-xs text-textMuted">
+              Sales &amp; operations for {profile?.branch_name ?? "your branch"} · PDF or CSV
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+        </Pressable>
+
+        <Text className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-textMuted">
           Preferences
         </Text>
         <View className="flex-row items-center justify-between rounded-2xl border border-line bg-surface px-4 py-3">
@@ -139,7 +174,7 @@ export default function StaffAccountScreen() {
         <View className="mt-6">
           <Button label="Sign out" variant="danger" onPress={confirmSignOut} />
         </View>
-      </View>
+      </ScrollView>
     </Screen>
   );
 }

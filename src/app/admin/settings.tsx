@@ -237,13 +237,28 @@ export default function AdminSettingsScreen() {
         <Group
           icon="gift-outline"
           title="Loyalty & Rewards"
-          summary={`${settings.loyalty_points_per_peso} point${settings.loyalty_points_per_peso === 1 ? "" : "s"} per ₱1`}
+          summary={`${settings.loyalty_points_awarded} pt${settings.loyalty_points_awarded === 1 ? "" : "s"} / ₱${settings.loyalty_spend_unit.toFixed(2)}`}
         >
         <NumberRow
-          label="Points per ₱1 spent"
-          value={settings.loyalty_points_per_peso}
-          onChange={(n) => set("loyalty_points_per_peso", n)}
+          label="Points awarded"
+          value={settings.loyalty_points_awarded}
+          onChange={(n) => set("loyalty_points_awarded", Math.max(1, Math.floor(n || 1)))}
         />
+        <NumberRow
+          label="For every ₱ spent"
+          value={settings.loyalty_spend_unit}
+          onChange={(n) => set("loyalty_spend_unit", n > 0 ? n : 1)}
+        />
+        <View className="mt-1 rounded-xl bg-accent-100 px-3 py-2">
+          <Text className="text-xs font-medium text-textPrimary">
+            Customers earn {settings.loyalty_points_awarded} point
+            {settings.loyalty_points_awarded === 1 ? "" : "s"} for every ₱
+            {settings.loyalty_spend_unit.toFixed(2)} of eligible spending.
+          </Text>
+          <Text className="mt-0.5 text-[11px] text-textMuted">
+            Tips and refunds are excluded. Points are calculated on the server when an order completes.
+          </Text>
+        </View>
 
         </Group>
 

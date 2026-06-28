@@ -11,7 +11,9 @@ import {
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnalyticsChart, type ChartPoint } from "@/components/admin/AnalyticsChart";
+import { DashboardSection } from "@/components/admin/DashboardSection";
 import { type ChartBucket } from "@/components/admin/RevenueChart";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ProductImage } from "@/components/ui/ProductImage";
@@ -144,6 +146,7 @@ const PERIOD_SUFFIX: Record<Period, string> = {
 
 export default function AdminReportsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [orders, setOrders] = useState<ReportOrder[]>([]);
   const [feedback, setFeedback] = useState<FeedbackRow[]>([]);
   const [cancellations, setCancellations] = useState<CancellationRow[]>([]);
@@ -315,7 +318,8 @@ export default function AdminReportsScreen() {
         <ErrorState message={error} onRetry={load} />
       ) : (
         <ScrollView
-          contentContainerClassName="px-5 pb-10"
+          contentContainerClassName="px-5"
+          contentContainerStyle={{ paddingBottom: insets.bottom + 88 }}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.brand} />
@@ -398,7 +402,8 @@ export default function AdminReportsScreen() {
           </View>
 
           {/* Analytics — one section; Revenue/Orders shown one at a time */}
-          <View className="mt-3 rounded-card border border-line bg-surface p-4" style={shadow.card}>
+          <Text className="mb-3 mt-8 font-heading text-lg text-textPrimary">Analytics</Text>
+          <View className="rounded-card border border-line bg-surface p-4" style={shadow.card}>
             <View className="mb-3 flex-row items-center justify-between">
               <View className="flex-row rounded-xl bg-surfaceMuted p-1">
                 {(["revenue", "orders"] as const).map((t) => (
@@ -458,13 +463,17 @@ export default function AdminReportsScreen() {
             <Text className="flex-1 text-sm font-medium text-textPrimary">{insight.text}</Text>
           </View>
 
-          {/* Low-stock summary */}
+          {/* Needs attention — inventory health, separated from analytics */}
           {lowStock ? (
-            <LowStockCard summary={lowStock} onPress={() => router.push("/admin/inventory")} />
+            <>
+              <Text className="mb-3 mt-8 font-heading text-lg text-textPrimary">Needs attention</Text>
+              <LowStockCard summary={lowStock} onPress={() => router.push("/admin/inventory")} />
+            </>
           ) : null}
 
           {/* Quick actions — 2-column grid (roomier than four narrow tiles) */}
-          <View className="mt-3 flex-row flex-wrap gap-3">
+          <Text className="mb-3 mt-8 font-heading text-lg text-textPrimary">Quick actions</Text>
+          <View className="flex-row flex-wrap gap-3">
             <QuickAction icon="bar-chart-outline" label="Reports" onPress={() => router.push("/admin/reports")} />
             <QuickAction icon="add-circle-outline" label="Add product" onPress={() => router.push("/admin/product/new")} />
             <QuickAction icon="cube-outline" label="Inventory" onPress={() => router.push("/admin/inventory")} />
@@ -472,68 +481,55 @@ export default function AdminReportsScreen() {
           </View>
 
           {/* Top sellers — first 3, expandable */}
-          <View className="mb-2 mt-6 flex-row items-center justify-between">
-            <Text className="font-heading text-lg text-textPrimary">Top sellers</Text>
-            {stats.top.length > 3 ? (
-              <Pressable
-                onPress={() => setShowAllSellers((v) => !v)}
-                accessibilityRole="button"
-                className="flex-row items-center gap-1"
-              >
-                <Text className="text-xs font-semibold text-brandPrimary">
-                  {showAllSellers ? "Show less" : "View all"}
-                </Text>
-                <Ionicons
-                  name={showAllSellers ? "chevron-up" : "chevron-down"}
-                  size={14}
-                  color={Colors.brand}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-          {stats.top.length === 0 ? (
-            <Empty text="No sales in this period yet." />
-          ) : (
-            <View className="rounded-card border border-line bg-surface">
-              {(showAllSellers ? stats.top : stats.top.slice(0, 3)).map((p, i) => (
-                <View
-                  key={p.name}
-                  className={`flex-row items-center px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}
-                >
-                  <Text className="w-6 font-display text-base text-brand-400">{i + 1}</Text>
-                  <ProductImage
-                    source={localProductImage(p.name)}
-                    emoji="☕"
-                    emojiSize={16}
-                    className="mr-3 h-9 w-9 rounded-lg"
-                    accessibilityLabel={p.name}
-                  />
-                  <Text className="flex-1 text-sm font-medium text-textPrimary" numberOfLines={1}>
-                    {p.name}
-                  </Text>
-                  <Text className="text-sm font-bold text-brandPrimary">{p.qty} sold</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Feedback */}
-          <Pressable
-            onPress={() => router.push("/admin/feedback")}
-            accessibilityRole="button"
-            className="mb-2 mt-6 flex-row items-center justify-between"
+          <DashboardSection
+            title="Top sellers"
+            action={
+              stats.top.length > 3
+                ? {
+                    label: showAllSellers ? "Show less" : "View all",
+                    onPress: () => setShowAllSellers((v) => !v),
+                    icon: showAllSellers ? "chevron-up" : "chevron-down",
+                  }
+                : undefined
+            }
           >
-            <Text className="font-heading text-lg text-textPrimary">Recent feedback</Text>
-            <View className="flex-row items-center gap-1">
-              <Text className="text-xs font-semibold text-brandPrimary">View all</Text>
-              <Ionicons name="chevron-forward" size={14} color={Colors.brand} />
-            </View>
-          </Pressable>
-          {ratings.list.length === 0 ? (
-            <Empty text="No feedback in this period." />
-          ) : (
-            <View className="gap-2">
-              {ratings.list.slice(0, 5).map((f) => (
+            {stats.top.length === 0 ? (
+              <Empty text="No sales in this period yet." />
+            ) : (
+              <View className="rounded-card border border-line bg-surface">
+                {(showAllSellers ? stats.top : stats.top.slice(0, 3)).map((p, i) => (
+                  <View
+                    key={p.name}
+                    className={`flex-row items-center px-4 py-3 ${i > 0 ? "border-t border-line" : ""}`}
+                  >
+                    <Text className="w-6 font-display text-base text-brand-400">{i + 1}</Text>
+                    <ProductImage
+                      source={localProductImage(p.name)}
+                      emoji="☕"
+                      emojiSize={16}
+                      className="mr-3 h-9 w-9 rounded-lg"
+                      accessibilityLabel={p.name}
+                    />
+                    <Text className="flex-1 text-sm font-medium text-textPrimary" numberOfLines={1}>
+                      {p.name}
+                    </Text>
+                    <Text className="text-sm font-bold text-brandPrimary">{p.qty} sold</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </DashboardSection>
+
+          {/* Recent feedback */}
+          <DashboardSection
+            title="Recent feedback"
+            action={{ label: "View all", onPress: () => router.push("/admin/feedback") }}
+          >
+            {ratings.list.length === 0 ? (
+              <Empty text="No feedback in this period." />
+            ) : (
+              <View className="gap-2">
+                {ratings.list.slice(0, 5).map((f) => (
                 <View key={f.id} className="rounded-card border border-line bg-surface p-3">
                   <View className="flex-row items-center justify-between">
                     <Text className="text-sm">
@@ -547,13 +543,12 @@ export default function AdminReportsScreen() {
                   ) : null}
                 </View>
               ))}
-            </View>
-          )}
+              </View>
+            )}
+          </DashboardSection>
 
           {/* Cancellation reasons */}
-          <Text className="mb-2 mt-6 font-heading text-lg text-textPrimary">
-            Cancellation reasons
-          </Text>
+          <DashboardSection title="Cancellation reasons">
           {cancelStats.count === 0 ? (
             <Empty text="No cancellations in this period." />
           ) : (
@@ -587,6 +582,7 @@ export default function AdminReportsScreen() {
               </View>
             </Pressable>
           )}
+          </DashboardSection>
         </ScrollView>
       )}
     </Screen>
@@ -645,7 +641,7 @@ function LowStockCard({
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel="Inventory healthy. Open inventory."
-        className="mt-3 flex-row items-center gap-2 rounded-card border border-line bg-surface p-4"
+        className="flex-row items-center gap-2 rounded-card border border-line bg-surface p-4"
         style={shadow.card}
       >
         <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
@@ -659,7 +655,7 @@ function LowStockCard({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`Low stock: ${summary.out} out, ${summary.critical} critical, ${summary.low} low. Open inventory.`}
-      className="mt-3 rounded-card border border-line bg-surface p-4"
+      className="rounded-card border border-line bg-surface p-4"
       style={shadow.card}
     >
       <View className="flex-row items-center justify-between">

@@ -23,17 +23,29 @@ if (bErr) {
 }
 const activeBranches = (branchRows ?? []).filter((b) => b.is_active);
 if (activeBranches.length === 0) console.warn("⚠ No active branches — baristas will be left unassigned.");
+const targetBaristas = DEMO_ACCOUNTS.filter((a) => a.role === "staff").length;
+if (activeBranches.length && activeBranches.length !== targetBaristas) {
+  console.warn(
+    `⚠ ${activeBranches.length} active branch(es) but ${targetBaristas} baristas. The prompt expects` +
+      " one barista per branch. Baristas will still be distributed — verify coverage afterward.",
+  );
+}
 
-let baristaIndex = 0;
-function resolveBranch(acct) {
+// One barista per branch: assign the first not-yet-taken active branch. Reused
+// baristas keep their existing branch (marked taken so others fill the gaps).
+const takenBranchIds = new Set();
+function assignBranch(acct) {
   if (acct.branchName) {
     const m = activeBranches.find((b) => b.name.toLowerCase() === acct.branchName.toLowerCase());
-    if (m) return m;
+    if (m) {
+      takenBranchIds.add(m.id);
+      return m;
+    }
     console.warn(`⚠ Branch "${acct.branchName}" not found/active for ${acct.email} — auto-distributing.`);
   }
-  if (activeBranches.length === 0) return null;
-  const b = activeBranches[baristaIndex % activeBranches.length];
-  baristaIndex++;
+  const free = activeBranches.find((b) => !takenBranchIds.has(b.id));
+  const b = free ?? activeBranches[0] ?? null; // more baristas than branches → reuse first
+  if (b) takenBranchIds.add(b.id);
   return b;
 }
 
@@ -42,11 +54,11 @@ const report = { created: [], updated: [], preserved: [], skipped: [] };
 
 for (const acct of DEMO_ACCOUNTS) {
   const email = acct.email.trim().toLowerCase();
-  const wantBranch = acct.role === "staff" ? resolveBranch(acct) : null;
   const existing = await findAuthUserByEmail(email);
 
   if (!existing) {
     // CREATE — the handle_new_user trigger makes the profile row from metadata.
+    const wantBranch = acct.role === "staff" ? assignBranch(acct) : null;
     if (DRY_RUN) {
       log(`CREATE ${email} (${acct.role}${wantBranch ? `, ${wantBranch.name}` : ""}) password=123456`);
       report.created.push(email);
@@ -87,11 +99,15 @@ for (const acct of DEMO_ACCOUNTS) {
     patch.role = acct.role;
     changes.push(`role ${prof.role}→${acct.role}`);
   }
-  if (acct.role === "staff" && wantBranch && prof && prof.branch_id !== wantBranch.id) {
-    // Only assign if currently unassigned OR a branch was explicitly requested.
-    if (!prof.branch_id || acct.branchName) {
-      patch.branch_id = wantBranch.id;
-      changes.push(`branch → ${wantBranch.name}`);
+  if (acct.role === "staff") {
+    if (prof?.branch_id && !acct.branchName) {
+      takenBranchIds.add(prof.branch_id); // keep existing assignment; mark covered
+    } else {
+      const wantBranch = assignBranch(acct);
+      if (wantBranch && prof?.branch_id !== wantBranch.id) {
+        patch.branch_id = wantBranch.id;
+        changes.push(`branch → ${wantBranch.name}`);
+      }
     }
   }
 

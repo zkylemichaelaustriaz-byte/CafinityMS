@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ActivityIndicator, ScrollView, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { ReportGeneratorSheet } from "@/components/reports/ReportGeneratorSheet";
 import { BranchPickerSheet, BranchSelectorField } from "@/components/ui/BranchSelector";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
@@ -46,6 +47,7 @@ export default function AdminReportsScreen() {
   const [period, setPeriod] = useState<Period>("today");
   const [branchId, setBranchId] = useState<string | null>(null);
   const [branchSheet, setBranchSheet] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -101,8 +103,33 @@ export default function AdminReportsScreen() {
 
   return (
     <Screen edges={["top"]}>
-      <Header title="Sales report" />
+      <Header
+        title="Sales report"
+        right={
+          <Pressable onPress={() => setGenOpen(true)} hitSlop={10} accessibilityLabel="Generate report">
+            <Ionicons name="share-outline" size={22} color={Colors.brand} />
+          </Pressable>
+        }
+      />
+      <ReportGeneratorSheet
+        visible={genOpen}
+        onClose={() => setGenOpen(false)}
+        mode="admin"
+        branches={branches}
+      />
       <ScrollView contentContainerClassName="p-5 pb-10" showsVerticalScrollIndicator={false}>
+        {/* Generate full report (PDF / CSV exports) */}
+        <Pressable
+          onPress={() => setGenOpen(true)}
+          className="mb-3 flex-row items-center gap-3 rounded-card border border-brandPrimary bg-accent-100 p-3.5"
+        >
+          <Ionicons name="document-text-outline" size={20} color={Colors.brand} />
+          <View className="flex-1">
+            <Text className="text-sm font-bold text-textPrimary">Generate report</Text>
+            <Text className="text-xs text-textSecondary">PDF summary or CSV export · any date range</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={Colors.brand} />
+        </Pressable>
         {/* Period */}
         <View className="mb-3 flex-row rounded-2xl bg-surfaceMuted p-1">
           {(["today", "week", "month"] as Period[]).map((p) => (

@@ -37,6 +37,9 @@ yarn-error.*
 # smoke-test export output
 .smoke-export/
 
+# demo-data inventory snapshot (generated; restore source for cleanup)
+scripts/.inventory-backup.json
+
 # typescript
 *.tsbuildinfo
 
@@ -45,3 +48,8 @@ example
 # generated native folders
 /ios
 /android
+
+# build artifacts (installable binaries — never commit)
+artifacts/
+*.apk
+*.aab

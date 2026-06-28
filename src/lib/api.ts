@@ -19,6 +19,7 @@ import type {
   PaymentStatus,
   PlaceOrderResult,
   Product,
+  ProductIngredient,
   Profile,
   Promotion,
   Reward,
@@ -61,9 +62,10 @@ export async function getBranches(
 
 const PRODUCT_SELECT = `
   id, category_id, name, description, image_url, is_available, is_featured, created_at, collection_key, is_seasonal,
+  long_description, fun_fact, info_visible, ingredients, allergens, dietary_tags, caffeine_mg,
   product_categories ( name, display_order ),
   product_media ( presentation_key, image_url, is_active ),
-  product_variants ( id, product_id, name, price, is_default, is_available, deleted_at ),
+  product_variants ( id, product_id, name, price, is_default, is_available, deleted_at, serving_size, calories, carbs_g, sugar_g, protein_g, fat_g, sodium_mg, nutrition_estimated ),
   product_customization_link (
     customization_groups (
       id, name, selection_type,
@@ -101,6 +103,14 @@ function transformProduct(row: any, inv: InventoryMap): MenuProduct {
       // Closed-by-default: a variant with no inventory row is unavailable.
       const available =
         v.is_available && (stock ? stock.available && stock.stock > 0 : false);
+      const hasNutrition =
+        v.serving_size != null ||
+        v.calories != null ||
+        v.carbs_g != null ||
+        v.sugar_g != null ||
+        v.protein_g != null ||
+        v.fat_g != null ||
+        v.sodium_mg != null;
       return {
         id: v.id,
         product_id: v.product_id,
@@ -108,6 +118,18 @@ function transformProduct(row: any, inv: InventoryMap): MenuProduct {
         price: Number(v.price),
         is_default: v.is_default,
         is_available: available,
+        nutrition: hasNutrition
+          ? {
+              serving_size: v.serving_size ?? null,
+              calories: v.calories ?? null,
+              carbs_g: v.carbs_g != null ? Number(v.carbs_g) : null,
+              sugar_g: v.sugar_g != null ? Number(v.sugar_g) : null,
+              protein_g: v.protein_g != null ? Number(v.protein_g) : null,
+              fat_g: v.fat_g != null ? Number(v.fat_g) : null,
+              sodium_mg: v.sodium_mg ?? null,
+              estimated: v.nutrition_estimated !== false,
+            }
+          : undefined,
       };
     })
     .sort((a: Variant, b: Variant) => a.price - b.price);
@@ -163,6 +185,17 @@ function transformProduct(row: any, inv: InventoryMap): MenuProduct {
     collection_key: row.collection_key ?? null,
     is_seasonal: row.is_seasonal ?? false,
     orderable: true, // refined by the caller against the active seasonal campaign
+    info_visible: row.info_visible !== false,
+    long_description: row.long_description ?? null,
+    fun_fact: row.fun_fact ?? null,
+    ingredients: Array.isArray(row.ingredients)
+      ? row.ingredients
+          .filter((i: any) => i && typeof i.name === "string" && i.name.trim())
+          .map((i: any) => ({ name: String(i.name), note: i.note ?? null }))
+      : [],
+    allergens: Array.isArray(row.allergens) ? row.allergens : [],
+    dietary_tags: Array.isArray(row.dietary_tags) ? row.dietary_tags : [],
+    caffeine_mg: row.caffeine_mg ?? null,
     media: (row.product_media ?? []).reduce(
       (acc: Record<string, string>, m: any) => {
         if (m?.is_active && m?.image_url) acc[m.presentation_key] = m.image_url;
@@ -534,10 +567,22 @@ export async function getStaffStats(branchId: string | null = null): Promise<Sta
   };
 }
 
+// A unique, collision-safe Realtime topic per subscription INSTANCE. Reusing a
+// fixed topic (e.g. `order-<id>`) lets a dev double-mount or a re-subscribe land
+// on an already-joined channel, and adding a postgres_changes listener after
+// subscribe() throws ("cannot add ... callbacks ... after subscribe()"). A fresh
+// topic each call guarantees every channel registers its handlers before joining.
+let _channelSeq = 0;
+function uniqueTopic(base: string): string {
+  _channelSeq += 1;
+  return `${base}:${Date.now().toString(36)}:${_channelSeq.toString(36)}`;
+}
+
 /** Subscribe to status/payment changes for a single order. Returns unsubscribe. */
 export function subscribeOrder(orderId: string, onChange: (o: Order) => void) {
+  // Build the channel with ALL listeners, THEN subscribe exactly once.
   const channel = supabase
-    .channel(`order-${orderId}`)
+    .channel(uniqueTopic(`order-${orderId}`))
     .on(
       "postgres_changes",
       { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${orderId}` },
@@ -545,7 +590,7 @@ export function subscribeOrder(orderId: string, onChange: (o: Order) => void) {
     )
     .subscribe();
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -838,10 +883,30 @@ export async function markAllNotificationsRead(): Promise<void> {
   if (error) throw error;
 }
 
+// Deletions are owner-scoped by RLS (phase32), so each call only removes the
+// signed-in customer's own notifications — never another user's, and never the
+// underlying order.
+export async function deleteNotification(id: string): Promise<void> {
+  const { error } = await supabase.from("notifications").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function clearReadNotifications(): Promise<void> {
+  const { error } = await supabase.from("notifications").delete().not("read_at", "is", null);
+  if (error) throw error;
+}
+
+export async function clearAllNotifications(): Promise<void> {
+  // RLS limits this to the caller's rows; the filter satisfies PostgREST's
+  // requirement that a delete have a WHERE clause.
+  const { error } = await supabase.from("notifications").delete().not("id", "is", null);
+  if (error) throw error;
+}
+
 /** Live updates for a user's notifications (insert/update). Returns unsubscribe. */
 export function subscribeNotifications(userId: string, onChange: () => void) {
   const channel = supabase
-    .channel(`notifications-${userId}`)
+    .channel(uniqueTopic(`notifications-${userId}`))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
@@ -849,7 +914,7 @@ export function subscribeNotifications(userId: string, onChange: () => void) {
     )
     .subscribe();
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -992,7 +1057,7 @@ export async function getFinishedOrders(
 /** Subscribe to ANY order change (staff queue). Returns unsubscribe. */
 export function subscribeAllOrders(onChange: () => void) {
   const channel = supabase
-    .channel("orders-all")
+    .channel(uniqueTopic("orders-all"))
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "orders" },
@@ -1000,7 +1065,7 @@ export function subscribeAllOrders(onChange: () => void) {
     )
     .subscribe();
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -1036,6 +1101,108 @@ export async function getOrdersSince(fromISO: string): Promise<ReportOrder[]> {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as unknown as ReportOrder[];
+}
+
+// ---- Report generator (role-scoped via SECURITY DEFINER RPCs) --------------
+
+export interface ReportLineItem {
+  product_name: string;
+  variant_name: string;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+}
+
+export interface ReportFullOrder {
+  id: string;
+  order_number: string | null;
+  created_at: string;
+  scheduled_for: string | null;
+  cancelled_at: string | null;
+  status: OrderStatus;
+  payment_status: PaymentStatus;
+  payment_method: string;
+  subtotal: number;
+  discount_amount: number;
+  promo_discount: number;
+  loyalty_reward_discount: number;
+  statutory_discount: number;
+  tip_amount: number;
+  vat_amount: number;
+  total_amount: number;
+  refund_status: string | null;
+  refunded_amount: number | null;
+  cancellation_reason: string | null;
+  branch_id: string;
+  branch_name: string;
+  order_items: ReportLineItem[];
+}
+
+export interface ReportFeedbackSummary {
+  avg: number;
+  count: number;
+  tags: Record<string, number>;
+}
+
+/** Raised when a barista's report scope is invalid (enforced in the database). */
+export class ReportScopeError extends Error {
+  kind: "no_branch" | "forbidden" | "unauthorized";
+  constructor(kind: "no_branch" | "forbidden" | "unauthorized", message: string) {
+    super(message);
+    this.name = "ReportScopeError";
+    this.kind = kind;
+  }
+}
+
+function mapReportError(error: { message?: string }): never {
+  const m = error.message ?? "";
+  if (/NO_BRANCH/.test(m)) {
+    throw new ReportScopeError(
+      "no_branch",
+      "Your staff account isn't assigned to a branch yet. Ask an administrator to assign one.",
+    );
+  }
+  if (/FORBIDDEN_BRANCH/.test(m)) {
+    throw new ReportScopeError("forbidden", "You can only generate reports for your assigned branch.");
+  }
+  if (/Not authorized/.test(m)) {
+    throw new ReportScopeError("unauthorized", "You're not authorized to generate this report.");
+  }
+  throw error as Error;
+}
+
+/**
+ * Orders for a report. The database enforces scope: admins may pass any branch
+ * (or null for all); baristas are locked to their assigned branch regardless of
+ * what is requested. `branchId` null = all branches (admin only).
+ */
+export async function fetchReportOrders(
+  fromISO: string,
+  toISO: string,
+  branchId: string | null,
+): Promise<ReportFullOrder[]> {
+  const { data, error } = await supabase.rpc("report_orders", {
+    p_from: fromISO,
+    p_to: toISO,
+    p_branch_id: branchId,
+  });
+  if (error) mapReportError(error);
+  return (data ?? []) as ReportFullOrder[];
+}
+
+export async function fetchReportFeedback(
+  fromISO: string,
+  toISO: string,
+  branchId: string | null,
+): Promise<ReportFeedbackSummary> {
+  const { data, error } = await supabase.rpc("report_feedback", {
+    p_from: fromISO,
+    p_to: toISO,
+    p_branch_id: branchId,
+  });
+  if (error) mapReportError(error);
+  const d = (data ?? {}) as Partial<ReportFeedbackSummary>;
+  return { avg: Number(d.avg ?? 0), count: Number(d.count ?? 0), tags: d.tags ?? {} };
 }
 
 export interface CancellationRow {
@@ -1111,13 +1278,14 @@ export interface InventoryRow {
   variant_name: string;
   product_name: string;
   price: number;
+  updated_at: string; // optimistic-concurrency token for batch save
 }
 
 export async function getInventory(branchId: string): Promise<InventoryRow[]> {
   const { data, error } = await supabase
     .from("branch_inventory")
     .select(
-      "id, stock_quantity, low_stock_threshold, is_available, product_variant_id, product_variants ( name, price, products ( name ) )",
+      "id, stock_quantity, low_stock_threshold, is_available, updated_at, product_variant_id, product_variants ( name, price, products ( name ) )",
     )
     .eq("branch_id", branchId);
   if (error) throw error;
@@ -1131,6 +1299,7 @@ export async function getInventory(branchId: string): Promise<InventoryRow[]> {
       variant_name: r.product_variants?.name ?? "",
       product_name: r.product_variants?.products?.name ?? "",
       price: Number(r.product_variants?.price ?? 0),
+      updated_at: r.updated_at,
     }))
     .sort(
       (a: InventoryRow, b: InventoryRow) =>
@@ -1211,11 +1380,50 @@ export async function updateStock(
   if (error) throw error;
 }
 
+export interface InventorySaveItem {
+  id: string;
+  stock_quantity: number;
+  is_available: boolean;
+  updated_at: string; // expected version (optimistic concurrency)
+}
+
+/** Thrown when another admin changed a row since it was loaded. */
+export class InventoryConflictError extends Error {
+  constructor() {
+    super("Inventory changed elsewhere");
+    this.name = "InventoryConflictError";
+  }
+}
+
+/**
+ * Atomically save a set of inventory edits for one branch (admin only, all or
+ * nothing) via the save_branch_inventory RPC. Detects concurrent edits through
+ * each row's expected updated_at and surfaces them as InventoryConflictError.
+ * Returns the new updated_at applied to every saved row.
+ */
+export async function saveBranchInventory(items: InventorySaveItem[]): Promise<string> {
+  const { data, error } = await supabase.rpc("save_branch_inventory", { p_items: items });
+  if (error) {
+    if (error.code === "40001" || /CONFLICT/i.test(error.message ?? "")) {
+      throw new InventoryConflictError();
+    }
+    throw error;
+  }
+  return data as string;
+}
+
 // ---- Menu CRUD -------------------------------------------------------------
 
 export interface AdminProduct extends Product {
   category_name: string;
   variants: Variant[];
+  long_description: string | null;
+  fun_fact: string | null;
+  info_visible: boolean;
+  ingredients: ProductIngredient[];
+  allergens: string[];
+  dietary_tags: string[];
+  caffeine_mg: number | null;
   collection_key: string | null;
   is_seasonal: boolean;
 }
@@ -1233,7 +1441,7 @@ export async function getAdminProducts(): Promise<AdminProduct[]> {
   const { data, error } = await supabase
     .from("products")
     .select(
-      "id, category_id, name, description, image_url, is_available, is_featured, collection_key, is_seasonal, product_categories ( name ), product_variants ( id, product_id, name, price, is_default, is_available, deleted_at )",
+      "id, category_id, name, description, image_url, is_available, is_featured, collection_key, is_seasonal, long_description, fun_fact, info_visible, ingredients, allergens, dietary_tags, caffeine_mg, product_categories ( name ), product_variants ( id, product_id, name, price, is_default, is_available, deleted_at, serving_size, calories, carbs_g, sugar_g, protein_g, fat_g, sodium_mg, nutrition_estimated )",
     )
     .is("deleted_at", null)
     .order("name");
@@ -1249,6 +1457,17 @@ export async function getAdminProducts(): Promise<AdminProduct[]> {
     collection_key: p.collection_key ?? null,
     is_seasonal: p.is_seasonal ?? false,
     category_name: p.product_categories?.name ?? "Other",
+    long_description: p.long_description ?? null,
+    fun_fact: p.fun_fact ?? null,
+    info_visible: p.info_visible !== false,
+    ingredients: Array.isArray(p.ingredients)
+      ? p.ingredients
+          .filter((i: any) => i && typeof i.name === "string")
+          .map((i: any) => ({ name: String(i.name), note: i.note ?? null }))
+      : [],
+    allergens: Array.isArray(p.allergens) ? p.allergens : [],
+    dietary_tags: Array.isArray(p.dietary_tags) ? p.dietary_tags : [],
+    caffeine_mg: p.caffeine_mg ?? null,
     variants: (p.product_variants ?? [])
       .filter((v: any) => v.deleted_at == null)
       .map((v: any) => ({
@@ -1258,6 +1477,16 @@ export async function getAdminProducts(): Promise<AdminProduct[]> {
         price: Number(v.price),
         is_default: v.is_default,
         is_available: v.is_available,
+        nutrition: {
+          serving_size: v.serving_size ?? null,
+          calories: v.calories ?? null,
+          carbs_g: v.carbs_g != null ? Number(v.carbs_g) : null,
+          sugar_g: v.sugar_g != null ? Number(v.sugar_g) : null,
+          protein_g: v.protein_g != null ? Number(v.protein_g) : null,
+          fat_g: v.fat_g != null ? Number(v.fat_g) : null,
+          sodium_mg: v.sodium_mg ?? null,
+          estimated: v.nutrition_estimated !== false,
+        },
       }))
       .sort((a: Variant, b: Variant) => a.price - b.price),
   }));
@@ -1308,6 +1537,30 @@ export interface UpdateProductPatch {
   image_url?: string | null;
   is_seasonal?: boolean;
   collection_key?: string | null;
+  // Product information (phase33)
+  long_description?: string | null;
+  fun_fact?: string | null;
+  info_visible?: boolean;
+  ingredients?: ProductIngredient[];
+  allergens?: string[];
+  dietary_tags?: string[];
+  caffeine_mg?: number | null;
+}
+
+/** Patch for a variant — basic fields plus per-serving nutrition (phase33). */
+export interface UpdateVariantPatch {
+  name?: string;
+  price?: number;
+  is_available?: boolean;
+  is_default?: boolean;
+  serving_size?: string | null;
+  calories?: number | null;
+  carbs_g?: number | null;
+  sugar_g?: number | null;
+  protein_g?: number | null;
+  fat_g?: number | null;
+  sodium_mg?: number | null;
+  nutrition_estimated?: boolean;
 }
 
 export async function updateProduct(id: string, patch: UpdateProductPatch): Promise<void> {
@@ -1326,6 +1579,14 @@ export interface FullProductInput {
   collection_key: string | null;
   variants: { name: string; price: number; is_default: boolean }[];
   groupIds: string[];
+  // Optional product information (phase33)
+  long_description?: string | null;
+  fun_fact?: string | null;
+  info_visible?: boolean;
+  ingredients?: ProductIngredient[];
+  allergens?: string[];
+  dietary_tags?: string[];
+  caffeine_mg?: number | null;
 }
 
 /** Create a product with all variants, customization links, and seasonal flags. */
@@ -1341,6 +1602,13 @@ export async function createProductFull(i: FullProductInput): Promise<string> {
       image_url: i.image_url,
       is_seasonal: i.is_seasonal,
       collection_key: i.collection_key,
+      long_description: i.long_description ?? null,
+      fun_fact: i.fun_fact ?? null,
+      info_visible: i.info_visible ?? true,
+      ingredients: i.ingredients ?? [],
+      allergens: i.allergens ?? [],
+      dietary_tags: i.dietary_tags ?? [],
+      caffeine_mg: i.caffeine_mg ?? null,
     })
     .select("id")
     .single();
@@ -1463,10 +1731,7 @@ export async function softDeleteProduct(id: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function updateVariant(
-  id: string,
-  patch: Partial<Pick<Variant, "name" | "price" | "is_available" | "is_default">>,
-): Promise<void> {
+export async function updateVariant(id: string, patch: UpdateVariantPatch): Promise<void> {
   const { error } = await supabase.from("product_variants").update(patch).eq("id", id);
   if (error) throw error;
 }
@@ -1523,6 +1788,23 @@ export async function setStaffBranch(userId: string, branchId: string): Promise<
   if (error) throw error;
 }
 
+/**
+ * Admin-only: set a staff member's branch scope — either one assigned branch or
+ * all-branch access. Enforced server-side (RLS + trigger), not just in the UI.
+ */
+export async function setStaffBranchAccess(
+  userId: string,
+  branchId: string | null,
+  allAccess: boolean,
+): Promise<void> {
+  const { error } = await supabase.rpc("set_staff_branch_access", {
+    p_user_id: userId,
+    p_branch_id: branchId,
+    p_all_access: allAccess,
+  });
+  if (error) throw error;
+}
+
 export async function setUserRole(userId: string, role: UserRole): Promise<void> {
   const { error } = await supabase.rpc("set_user_role", {
     p_user_id: userId,
@@ -1553,6 +1835,8 @@ export async function getAdminSettings(): Promise<AdminSettings> {
     service_fee_taxable: bool("service_fee_taxable", false),
     tipping_enabled: bool("tipping_enabled", true),
     loyalty_points_per_peso: num("loyalty_points_per_peso", 1),
+    loyalty_points_awarded: num("loyalty_points_awarded", 1),
+    loyalty_spend_unit: num("loyalty_spend_unit", 1),
     cancellation_policy:
       (d.cancellation_policy as AdminSettings["cancellation_policy"]) ?? "until_preparing",
     cancellation_window_minutes: num("cancellation_window_minutes", 0),

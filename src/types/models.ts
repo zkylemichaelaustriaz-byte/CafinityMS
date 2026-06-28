@@ -24,6 +24,8 @@ export interface Profile {
   last_order_date: string | null;
   branch_id: string | null;
   branch_name: string | null;
+  /** Admin-granted access to every branch (staff only; default false). */
+  all_branches_access?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -60,7 +62,11 @@ export interface AdminSettings {
   service_fee_applies_pickup: boolean;
   service_fee_taxable: boolean;
   tipping_enabled: boolean;
+  /** Legacy flat rate (kept for compatibility). */
   loyalty_points_per_peso: number;
+  /** Flexible earning: award this many points for every `loyalty_spend_unit` pesos. */
+  loyalty_points_awarded: number;
+  loyalty_spend_unit: number;
   cancellation_policy: "until_preparing" | "within_n_minutes" | "disabled";
   cancellation_window_minutes: number;
   cancellation_reason_required: boolean;
@@ -85,6 +91,19 @@ export interface Category {
   display_order: number;
 }
 
+/** Per-serving nutrition for a variant. All values optional; `estimated` flags
+ *  demonstration estimates vs. verified data. */
+export interface VariantNutrition {
+  serving_size?: string | null;
+  calories?: number | null;
+  carbs_g?: number | null;
+  sugar_g?: number | null;
+  protein_g?: number | null;
+  fat_g?: number | null;
+  sodium_mg?: number | null;
+  estimated: boolean;
+}
+
 export interface Variant {
   id: string;
   product_id: string;
@@ -92,6 +111,13 @@ export interface Variant {
   price: number;
   is_default: boolean;
   is_available: boolean;
+  nutrition?: VariantNutrition;
+}
+
+/** A single ingredient line for a product's information section. */
+export interface ProductIngredient {
+  name: string;
+  note?: string | null;
 }
 
 export interface CustomizationOption {
@@ -139,6 +165,15 @@ export interface MenuProduct extends Product {
   orderable: boolean;
   /** Remote per-presentation images (admin-uploaded). Default falls back to image_url. */
   media?: { default?: string; hot?: string; iced?: string };
+  // ---- Product information (phase33) ----
+  /** Whether the in-page Product information section should be shown. */
+  info_visible: boolean;
+  long_description?: string | null;
+  fun_fact?: string | null;
+  ingredients: ProductIngredient[];
+  allergens: string[];
+  dietary_tags: string[];
+  caffeine_mg?: number | null;
 }
 
 export interface Promotion {

@@ -8,7 +8,7 @@ import { BranchPickerSheet } from "@/components/ui/BranchSelector";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Screen } from "@/components/ui/Screen";
 import { Colors } from "@/constants/theme";
-import { getAllUsers, getBranches, setStaffBranch, setUserRole } from "@/lib/api";
+import { getAllUsers, getBranches, setStaffBranchAccess, setUserRole } from "@/lib/api";
 import { humanizeError } from "@/lib/errors";
 import { useAuth } from "@/store/auth";
 import type { Branch, Profile, UserRole } from "@/types/models";
@@ -120,16 +120,36 @@ export default function AdminUsersScreen() {
     }
   }
 
-  async function assignBranch(userId: string, branchId: string) {
+  async function assignBranch(userId: string, branchId: string | null) {
+    // branchId === null means "All branches" (explicit grant) — confirm first.
+    if (branchId === null) {
+      Alert.alert(
+        "Grant all-branch access?",
+        "This staff member will be able to view and act on orders for EVERY branch. Continue?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Grant all branches", style: "destructive", onPress: () => void applyAccess(userId, null, true) },
+        ],
+      );
+      return;
+    }
+    void applyAccess(userId, branchId, false);
+  }
+
+  async function applyAccess(userId: string, branchId: string | null, allAccess: boolean) {
     setBusyId(userId);
     try {
-      await setStaffBranch(userId, branchId);
-      const name = branches.find((b) => b.id === branchId)?.name ?? null;
+      await setStaffBranchAccess(userId, branchId, allAccess);
+      const name = allAccess ? null : branches.find((b) => b.id === branchId)?.name ?? null;
       setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, branch_id: branchId, branch_name: name } : u)),
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, branch_id: allAccess ? null : branchId, branch_name: name, all_branches_access: allAccess }
+            : u,
+        ),
       );
     } catch (e) {
-      Alert.alert("Could not assign branch", humanizeError(e));
+      Alert.alert("Could not update branch access", humanizeError(e));
     } finally {
       setBusyId(null);
     }
@@ -223,25 +243,34 @@ export default function AdminUsersScreen() {
                     {item.email}
                   </Text>
                   {isStaff ? (
-                    <Pressable
-                      onPress={() => setAssignFor(item.id)}
-                      hitSlop={6}
-                      accessibilityLabel={
-                        item.branch_name ? `Assigned to ${item.branch_name}. Change branch.` : "Assign a branch"
-                      }
-                      className="mt-1 flex-row items-center gap-1 self-start"
-                    >
-                      <Ionicons
-                        name="location-outline"
-                        size={12}
-                        color={item.branch_name ? Colors.brand : Colors.warning}
-                      />
-                      <Text
-                        className={`text-xs font-medium ${item.branch_name ? "text-brandPrimary" : "text-warning"}`}
-                      >
-                        {item.branch_name ?? "Assign a branch"}
-                      </Text>
-                    </Pressable>
+                    (() => {
+                      const allAccess = !!item.all_branches_access;
+                      const label = allAccess
+                        ? "All branches"
+                        : item.branch_name ?? "Assign a branch";
+                      const assigned = allAccess || !!item.branch_name;
+                      return (
+                        <Pressable
+                          onPress={() => setAssignFor(item.id)}
+                          hitSlop={6}
+                          accessibilityLabel={
+                            assigned ? `Branch access: ${label}. Change.` : "Assign a branch"
+                          }
+                          className="mt-1 flex-row items-center gap-1 self-start"
+                        >
+                          <Ionicons
+                            name={allAccess ? "git-branch-outline" : "location-outline"}
+                            size={12}
+                            color={assigned ? Colors.brand : Colors.warning}
+                          />
+                          <Text
+                            className={`text-xs font-medium ${assigned ? "text-brandPrimary" : "text-warning"}`}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })()
                   ) : null}
                 </View>
                 {busyId === item.id ? (
@@ -258,12 +287,18 @@ export default function AdminUsersScreen() {
       <BranchPickerSheet
         visible={assignFor !== null}
         branches={branches}
-        selectedId={users.find((u) => u.id === assignFor)?.branch_id ?? null}
+        allowAll
+        selectedId={
+          users.find((u) => u.id === assignFor)?.all_branches_access
+            ? null
+            : users.find((u) => u.id === assignFor)?.branch_id ?? null
+        }
         onSelect={(id) => {
-          if (assignFor && id) void assignBranch(assignFor, id);
+          // id === null → "All branches" grant (confirmed inside assignBranch).
+          if (assignFor) void assignBranch(assignFor, id);
         }}
         onClose={() => setAssignFor(null)}
-        title="Assign to branch"
+        title="Branch access"
       />
     </Screen>
   );

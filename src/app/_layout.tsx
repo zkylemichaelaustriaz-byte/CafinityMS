@@ -1,8 +1,13 @@
 import "@/global.css";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { Stack } from "expo-router";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider as NavThemeProvider,
+} from "@react-navigation/native";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -27,14 +32,35 @@ void SplashScreen.preventAutoHideAsync();
 
 /** Navigator rendered inside the theme provider so its content bg stays reactive. */
 function RootNavigator() {
-  const { colors } = useResolvedTheme();
+  const { colors, mode } = useResolvedTheme();
+  // Reactive React-Navigation theme so the navigator's own chrome (container
+  // background, borders, default text) follows light/dark live — without it the
+  // nav theme is static and only reflects the saved mode after a reload.
+  const navTheme = useMemo(() => {
+    const base = mode === "dark" ? DarkTheme : DefaultTheme;
+    return {
+      ...base,
+      colors: {
+        ...base.colors,
+        background: colors.cream,
+        card: colors.surface,
+        text: colors.espresso,
+        border: colors.border,
+        primary: colors.brand,
+        notification: colors.brand,
+      },
+    };
+  }, [mode, colors]);
+
   return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.cream },
-      }}
-    />
+    <NavThemeProvider value={navTheme}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.cream },
+        }}
+      />
+    </NavThemeProvider>
   );
 }
 

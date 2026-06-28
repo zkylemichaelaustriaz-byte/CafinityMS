@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { ProductImage } from "@/components/ui/ProductImage";
+import { ProductImageViewer } from "@/components/ui/ProductImageViewer";
+import { ProductInfoSection } from "@/components/product/ProductInfoSection";
 import { QuantityStepper } from "@/components/ui/QuantityStepper";
 import {
   KeyboardAwareScrollView,
@@ -54,12 +64,22 @@ export default function ProductScreen() {
   const [invalidGroupId, setInvalidGroupId] = useState<string | null>(null);
   const sectionY = useRef(0);
   const groupY = useRef<Record<string, number>>({});
-  // Persistent header: fade a solid bar + product title in once the hero (h-72 =
-  // 288px) has mostly scrolled past, so the Back control never disappears.
+  // Full-screen image viewer.
+  const [viewerOpen, setViewerOpen] = useState(false);
+  // Measured height of the solid summary strip below the image (so scroll content
+  // starts beneath image + strip). Seeded with an estimate to avoid first-paint jump.
+  const [stripH, setStripH] = useState(56);
+  // Responsive hero: scales with width, capped so it doesn't dominate tablets.
+  const { width: screenW } = useWindowDimensions();
+  const heroHeight = Math.round(Math.min(Math.max(screenW * 0.82, 260), 420));
+  // The image stays pinned at the top full-width and smoothly SHRINKS (it never
+  // becomes a small thumbnail) to this collapsed height as the customer scrolls.
+  const collapsedH = Math.round(Math.min(Math.max(heroHeight * 0.5, 150), 190));
+  const collapseDistance = heroHeight - collapsedH;
   const scrollY = useRef(new Animated.Value(0)).current;
-  const headerReveal = scrollY.interpolate({
-    inputRange: [196, 260],
-    outputRange: [0, 1],
+  const headerH = scrollY.interpolate({
+    inputRange: [0, collapseDistance],
+    outputRange: [heroHeight, collapsedH],
     extrapolate: "clamp",
   });
 
@@ -278,41 +298,22 @@ export default function ProductScreen() {
     );
   }
 
+  // Resolved hero image (follows Hot/Iced) reused by the hero, the sticky
+  // thumbnail, and the full-screen viewer.
+  const heroImage = resolveProductImage(
+    { name: product.name, image_url: product.image_url, media: product.media },
+    presentation,
+  );
+
   return (
     <View className="flex-1 bg-background">
       <KeyboardAwareScrollView
         ref={scrollRef}
         contentContainerClassName="pb-40"
+        contentContainerStyle={{ paddingTop: heroHeight + stripH }}
         scrollEventThrottle={16}
         onScroll={(e) => scrollY.setValue(e.nativeEvent.contentOffset.y)}
       >
-        {/* Hero — switches with Hot/Iced (expo-image crossfade, stable aspect) */}
-        <View>
-          <ProductImage
-            {...resolveProductImage(
-              { name: product.name, image_url: product.image_url, media: product.media },
-              presentation,
-            )}
-            emoji={categoryEmoji(product.category_name)}
-            emojiSize={76}
-            className="h-72 w-full"
-            accessibilityLabel={`${product.name}${presentation !== "default" ? `, ${presentation}` : ""}`}
-          />
-          {/* Bottom scrim separates the hero from the title below */}
-          <View pointerEvents="none" className="absolute bottom-0 left-0 right-0 h-16 bg-black/15" />
-          {/* Hot/Iced label once the customer selects a temperature */}
-          {presentation !== "default" ? (
-            <View className="absolute bottom-3 left-4 flex-row items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5">
-              <Ionicons
-                name={presentation === "iced" ? "snow-outline" : "flame-outline"}
-                size={13}
-                color="#fff"
-              />
-              <Text className="text-xs font-bold uppercase text-white">{presentation}</Text>
-            </View>
-          ) : null}
-        </View>
-
         <View
           className="px-5 pt-5"
           onLayout={(e) => {
@@ -332,6 +333,9 @@ export default function ProductScreen() {
               </Text>
             </View>
           ) : null}
+
+          {/* In-page product information (About / Ingredients / Nutrition / Allergens) */}
+          <ProductInfoSection product={product} variant={variant} />
 
           {/* Sizes */}
           {product.variants.length > 0 ? (
@@ -522,42 +526,85 @@ export default function ProductScreen() {
         </View>
       </KeyboardAwareScrollView>
 
-      {/* Persistent top bar — Back is always reachable; the solid surface + the
-          compact product name fade in once the hero scrolls away. box-none keeps
-          the transparent band scrollable; only the Back control captures taps. */}
-      <View
-        pointerEvents="box-none"
-        style={{ height: insets.top + 52 }}
-        className="absolute left-0 right-0 top-0"
-      >
-        <Animated.View
-          pointerEvents="none"
-          style={{ opacity: headerReveal }}
-          className="absolute inset-0 border-b border-line bg-surface"
-        />
-        <View
-          pointerEvents="box-none"
-          style={{ paddingTop: insets.top }}
-          className="flex-1 flex-row items-center px-4"
-        >
+      {/* Sticky media header: full-width collapsing image + a SOLID summary strip
+          directly beneath it. No product text sits on the photo (only the small
+          Hot/Iced badge), so name/price can never overlap the image or badge. */}
+      <View className="absolute left-0 right-0 top-0">
+        <Animated.View style={{ height: headerH }} className="overflow-hidden bg-background">
           <Pressable
-            onPress={() => router.back()}
-            accessibilityLabel="Go back"
-            hitSlop={8}
-            className="h-10 w-10 items-center justify-center rounded-full bg-white/90"
+            onPress={() => setViewerOpen(true)}
+            accessibilityRole="imagebutton"
+            accessibilityLabel={`${product.name}${presentation !== "default" ? `, ${presentation}` : ""}. Tap to view full image`}
+            className="h-full w-full"
           >
-            {/* Fixed dark arrow — the circle is always white, even in dark mode */}
-            <Ionicons name="chevron-back" size={24} color="#231711" />
+            <ProductImage
+              {...heroImage}
+              emoji={categoryEmoji(product.category_name)}
+              emojiSize={76}
+              className="h-full w-full"
+              accessibilityLabel={`${product.name}${presentation !== "default" ? `, ${presentation}` : ""}`}
+            />
+            {/* Hot/Iced badge — reserved lower-left corner (only on-image text) */}
+            {presentation !== "default" ? (
+              <View className="absolute bottom-3 left-4 flex-row items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5">
+                <Ionicons
+                  name={presentation === "iced" ? "snow-outline" : "flame-outline"}
+                  size={13}
+                  color="#fff"
+                />
+                <Text className="text-xs font-bold uppercase text-white">{presentation}</Text>
+              </View>
+            ) : null}
+            {/* Tap-to-view affordance — lower-right corner */}
+            <View
+              pointerEvents="none"
+              className="absolute bottom-3 right-4 h-9 w-9 items-center justify-center rounded-full bg-black/45"
+            >
+              <Ionicons name="expand-outline" size={18} color="#fff" />
+            </View>
           </Pressable>
-          <Animated.Text
-            numberOfLines={1}
-            style={{ opacity: headerReveal }}
-            className="ml-3 flex-1 font-heading text-base text-textPrimary"
-          >
-            {product.name}
-          </Animated.Text>
+        </Animated.View>
+
+        {/* Solid product-summary strip — name + price, then temperature · size */}
+        <View
+          onLayout={(e) => setStripH(e.nativeEvent.layout.height)}
+          className="border-b border-line bg-surface px-5 py-2.5"
+        >
+          <View className="flex-row items-start justify-between">
+            <Text numberOfLines={2} className="flex-1 pr-3 font-heading text-base text-textPrimary">
+              {product.name}
+            </Text>
+            {product.orderable && variant ? (
+              <Text className="font-display text-base text-brandPrimary">{peso(unitPrice)}</Text>
+            ) : null}
+          </View>
+          {presentation !== "default" || variant ? (
+            <Text numberOfLines={1} className="mt-0.5 text-xs text-textSecondary">
+              {[presentation === "iced" ? "Iced" : presentation === "hot" ? "Hot" : null, variant?.name]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+          ) : null}
         </View>
       </View>
+
+      {/* Fixed Back control — always visible/high-contrast over the image */}
+      <Pressable
+        onPress={() => router.back()}
+        accessibilityLabel="Go back"
+        hitSlop={8}
+        style={{ top: insets.top + 8 }}
+        className="absolute left-4 h-10 w-10 items-center justify-center rounded-full bg-white/90"
+      >
+        <Ionicons name="chevron-back" size={24} color="#231711" />
+      </Pressable>
+
+      <ProductImageViewer
+        visible={viewerOpen}
+        {...heroImage}
+        name={product.name}
+        onClose={() => setViewerOpen(false)}
+      />
 
       {/* Sticky add-to-cart */}
       <View

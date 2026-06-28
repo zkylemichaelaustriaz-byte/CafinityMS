@@ -26,20 +26,88 @@ import {
   updateVariant,
   type PresentationKey,
   type SimpleGroup,
+  type UpdateVariantPatch,
 } from "@/lib/api";
 import { uploadProductImage } from "@/lib/productImageUpload";
 import { CAMPAIGN_PRESETS } from "@/lib/campaignPresets";
 import { humanizeError } from "@/lib/errors";
 import { peso } from "@/lib/format";
 import { uuidv4 } from "@/lib/id";
-import type { Category } from "@/types/models";
+import type { Category, ProductIngredient } from "@/types/models";
 
-type LocalVariant = { key: string; id?: string; name: string; price: string; isDefault: boolean };
+type LocalVariant = {
+  key: string;
+  id?: string;
+  name: string;
+  price: string;
+  isDefault: boolean;
+  // Per-serving nutrition (strings for inputs; "" = unset)
+  servingSize: string;
+  calories: string;
+  carbs: string;
+  sugar: string;
+  protein: string;
+  fat: string;
+  sodium: string;
+};
 
 const SEASONAL_PRESETS = CAMPAIGN_PRESETS.filter((p) => p.key !== "default");
 
 function newVariant(name = "", price = "", isDefault = false): LocalVariant {
-  return { key: uuidv4(), name, price, isDefault };
+  return {
+    key: uuidv4(),
+    name,
+    price,
+    isDefault,
+    servingSize: "",
+    calories: "",
+    carbs: "",
+    sugar: "",
+    protein: "",
+    fat: "",
+    sodium: "",
+  };
+}
+
+const numOrNull = (s: string): number | null => {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+};
+function parseIngredients(text: string): ProductIngredient[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [name, ...rest] = l.split("|");
+      const note = rest.join("|").trim();
+      return { name: name.trim(), note: note || null };
+    })
+    .filter((i) => i.name);
+}
+function parseList(text: string): string[] {
+  return text
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+function hasNutrition(v: LocalVariant): boolean {
+  return [v.servingSize, v.calories, v.carbs, v.sugar, v.protein, v.fat, v.sodium].some(
+    (s) => s.trim() !== "",
+  );
+}
+function nutritionPatch(v: LocalVariant): UpdateVariantPatch {
+  return {
+    serving_size: v.servingSize.trim() || null,
+    calories: numOrNull(v.calories),
+    carbs_g: numOrNull(v.carbs),
+    sugar_g: numOrNull(v.sugar),
+    protein_g: numOrNull(v.protein),
+    fat_g: numOrNull(v.fat),
+    sodium_mg: numOrNull(v.sodium),
+  };
 }
 
 export default function AdminProductScreen() {
@@ -63,6 +131,16 @@ export default function AdminProductScreen() {
   const [originalIds, setOriginalIds] = useState<string[]>([]);
   const [media, setMedia] = useState<Partial<Record<PresentationKey, string>>>({});
   const [mediaBusy, setMediaBusy] = useState<PresentationKey | null>(null);
+
+  // ---- Product information (phase33) ----
+  const [longDesc, setLongDesc] = useState("");
+  const [funFact, setFunFact] = useState("");
+  const [infoVisible, setInfoVisible] = useState(true);
+  const [ingredientsText, setIngredientsText] = useState("");
+  const [allergensText, setAllergensText] = useState("");
+  const [dietaryText, setDietaryText] = useState("");
+  const [caffeine, setCaffeine] = useState("");
+  const [nutOpen, setNutOpen] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -94,6 +172,16 @@ export default function AdminProductScreen() {
           setImageUrl(p.image_url);
           setIsSeasonal(p.is_seasonal);
           setCollectionKey(p.collection_key);
+          setLongDesc(p.long_description ?? "");
+          setFunFact(p.fun_fact ?? "");
+          setInfoVisible(p.info_visible);
+          setIngredientsText(
+            p.ingredients.map((i) => (i.note ? `${i.name} | ${i.note}` : i.name)).join("\n"),
+          );
+          setAllergensText(p.allergens.join(", "));
+          setDietaryText(p.dietary_tags.join(", "));
+          setCaffeine(p.caffeine_mg != null ? String(p.caffeine_mg) : "");
+          const ns = (n: number | null | undefined) => (n != null ? String(n) : "");
           setVariants(
             p.variants.map((v) => ({
               key: v.id,
@@ -101,6 +189,13 @@ export default function AdminProductScreen() {
               name: v.name,
               price: String(v.price),
               isDefault: v.is_default,
+              servingSize: v.nutrition?.serving_size ?? "",
+              calories: ns(v.nutrition?.calories),
+              carbs: ns(v.nutrition?.carbs_g),
+              sugar: ns(v.nutrition?.sugar_g),
+              protein: ns(v.nutrition?.protein_g),
+              fat: ns(v.nutrition?.fat_g),
+              sodium: ns(v.nutrition?.sodium_mg),
             })),
           );
           setOriginalIds(p.variants.map((v) => v.id));
@@ -236,8 +331,17 @@ export default function AdminProductScreen() {
 
     setSaving(true);
     try {
+      const info = {
+        long_description: longDesc.trim() || null,
+        fun_fact: funFact.trim() || null,
+        info_visible: infoVisible,
+        ingredients: parseIngredients(ingredientsText),
+        allergens: parseList(allergensText),
+        dietary_tags: parseList(dietaryText),
+        caffeine_mg: numOrNull(caffeine),
+      };
       if (isNew) {
-        await createProductFull({
+        const newId = await createProductFull({
           name: name.trim(),
           description: description.trim(),
           category_id: categoryId,
@@ -252,7 +356,14 @@ export default function AdminProductScreen() {
             is_default: v.isDefault,
           })),
           groupIds: isPastry ? [] : groupIds,
+          ...info,
         });
+        // Apply per-variant nutrition to the freshly created sizes (by name).
+        const freshNew = (await getAdminProducts()).find((p) => p.id === newId)?.variants ?? [];
+        for (const fv of freshNew) {
+          const lv = normalized.find((v) => v.name.toLowerCase() === fv.name.toLowerCase());
+          if (lv && hasNutrition(lv)) await updateVariant(fv.id, nutritionPatch(lv));
+        }
       } else if (id) {
         await updateProduct(id, {
           name: name.trim(),
@@ -263,6 +374,7 @@ export default function AdminProductScreen() {
           image_url: imageUrl,
           is_seasonal: isSeasonal,
           collection_key: coll,
+          ...info,
         });
         // Variant diff.
         const keptIds = normalized.filter((v) => v.id).map((v) => v.id as string);
@@ -274,10 +386,14 @@ export default function AdminProductScreen() {
           if (v.id) await updateVariant(v.id, { name: v.name, price });
           else await createVariant(id, v.name, price);
         }
-        // Re-resolve default by name (covers newly created rows).
+        // Re-resolve default + nutrition by name (covers newly created rows).
         const fresh = (await getAdminProducts()).find((p) => p.id === id)?.variants ?? [];
         for (const fv of fresh) {
-          await updateVariant(fv.id, { is_default: fv.name === defName });
+          const lv = normalized.find((v) => v.name.toLowerCase() === fv.name.toLowerCase());
+          await updateVariant(fv.id, {
+            is_default: fv.name === defName,
+            ...(lv ? nutritionPatch(lv) : {}),
+          });
         }
         await setProductGroups(id, isPastry ? [] : groupIds);
       }
@@ -437,40 +553,82 @@ export default function AdminProductScreen() {
           </Pressable>
         </View>
         <View className="gap-2">
-          {variants.map((v) => (
-            <View
-              key={v.key}
-              className="flex-row items-center gap-2 rounded-2xl border border-line bg-surface p-2"
-            >
-              <Pressable onPress={() => makeDefault(v.key)} hitSlop={6} accessibilityLabel="Set as default size">
-                <Ionicons
-                  name={v.isDefault ? "radio-button-on" : "radio-button-off"}
-                  size={20}
-                  color={v.isDefault ? Colors.brand : "#C9A47C"}
-                />
-              </Pressable>
-              <Field
-                value={v.name}
-                onChangeText={(t) => setVariant(v.key, { name: t })}
-                placeholder="Size (e.g. Medium)"
-                containerClassName="flex-1"
-              />
-              <Field
-                value={v.price}
-                onChangeText={(t) => setVariant(v.key, { price: t })}
-                placeholder="₱"
-                keyboardType="decimal-pad"
-                containerClassName="w-20"
-              />
-              <Pressable onPress={() => removeVariantRow(v.key)} hitSlop={6} disabled={variants.length <= 1}>
-                <Ionicons
-                  name="trash-outline"
-                  size={18}
-                  color={variants.length <= 1 ? "#D6C9BA" : Colors.danger}
-                />
-              </Pressable>
-            </View>
-          ))}
+          {variants.map((v) => {
+            const nOpen = nutOpen.has(v.key);
+            return (
+              <View key={v.key} className="rounded-2xl border border-line bg-surface">
+                <View className="flex-row items-center gap-2 p-2">
+                  <Pressable onPress={() => makeDefault(v.key)} hitSlop={6} accessibilityLabel="Set as default size">
+                    <Ionicons
+                      name={v.isDefault ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={v.isDefault ? Colors.brand : "#C9A47C"}
+                    />
+                  </Pressable>
+                  <Field
+                    value={v.name}
+                    onChangeText={(t) => setVariant(v.key, { name: t })}
+                    placeholder="Size (e.g. Medium)"
+                    containerClassName="flex-1"
+                  />
+                  <Field
+                    value={v.price}
+                    onChangeText={(t) => setVariant(v.key, { price: t })}
+                    placeholder="₱"
+                    keyboardType="decimal-pad"
+                    containerClassName="w-20"
+                  />
+                  <Pressable
+                    onPress={() =>
+                      setNutOpen((prev) => {
+                        const n = new Set(prev);
+                        if (n.has(v.key)) n.delete(v.key);
+                        else n.add(v.key);
+                        return n;
+                      })
+                    }
+                    hitSlop={6}
+                    accessibilityLabel="Edit nutrition for this size"
+                  >
+                    <Ionicons
+                      name="nutrition-outline"
+                      size={18}
+                      color={hasNutrition(v) ? Colors.brand : "#C9A47C"}
+                    />
+                  </Pressable>
+                  <Pressable onPress={() => removeVariantRow(v.key)} hitSlop={6} disabled={variants.length <= 1}>
+                    <Ionicons
+                      name="trash-outline"
+                      size={18}
+                      color={variants.length <= 1 ? "#D6C9BA" : Colors.danger}
+                    />
+                  </Pressable>
+                </View>
+                {nOpen ? (
+                  <View className="border-t border-line p-2">
+                    <Field
+                      label="Serving size"
+                      value={v.servingSize}
+                      onChangeText={(t) => setVariant(v.key, { servingSize: t })}
+                      placeholder="e.g. 16 oz"
+                      containerClassName="mb-2"
+                    />
+                    <View className="flex-row flex-wrap gap-2">
+                      <NutField label="Calories" value={v.calories} onChange={(t) => setVariant(v.key, { calories: t })} />
+                      <NutField label="Carbs (g)" value={v.carbs} onChange={(t) => setVariant(v.key, { carbs: t })} />
+                      <NutField label="Sugar (g)" value={v.sugar} onChange={(t) => setVariant(v.key, { sugar: t })} />
+                      <NutField label="Protein (g)" value={v.protein} onChange={(t) => setVariant(v.key, { protein: t })} />
+                      <NutField label="Fat (g)" value={v.fat} onChange={(t) => setVariant(v.key, { fat: t })} />
+                      <NutField label="Sodium (mg)" value={v.sodium} onChange={(t) => setVariant(v.key, { sodium: t })} />
+                    </View>
+                    <Text className="mt-1 text-[11px] text-textMuted">
+                      Per serving. Leave blank to omit. Shown to customers as an estimate.
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
         </View>
         <Text className="mb-4 mt-1 text-[11px] text-textMuted">
           The filled circle marks the default size shown first.
@@ -561,6 +719,60 @@ export default function AdminProductScreen() {
           )
         ) : null}
 
+        {/* Product information (customer in-page section) */}
+        <View className="mb-4 mt-2">
+          <View className="mb-2 flex-row items-center justify-between">
+            <Text className="text-base font-bold text-textPrimary">Product information</Text>
+            <View className="flex-row items-center gap-2">
+              <Text className="text-xs text-textMuted">Visible</Text>
+              <Switch value={infoVisible} onValueChange={setInfoVisible} trackColor={{ true: Colors.brand }} />
+            </View>
+          </View>
+          <Field
+            label="Extended description"
+            value={longDesc}
+            onChangeText={setLongDesc}
+            placeholder="Longer ‘About this item’ text shown in the info section"
+            multiline
+          />
+          <Field
+            label="Fun fact (optional)"
+            value={funFact}
+            onChangeText={setFunFact}
+            placeholder="A short ‘Did you know?’ note"
+            multiline
+          />
+          <Field
+            label="Ingredients"
+            value={ingredientsText}
+            onChangeText={setIngredientsText}
+            placeholder={"One per line. Add a note after | — e.g.\nEspresso\nCondensed milk | sweetener"}
+            multiline
+          />
+          <Field
+            label="Allergens (comma-separated)"
+            value={allergensText}
+            onChangeText={setAllergensText}
+            placeholder="e.g. Contains milk, May contain nuts"
+          />
+          <Field
+            label="Dietary tags (comma-separated)"
+            value={dietaryText}
+            onChangeText={setDietaryText}
+            placeholder="e.g. Vegetarian, Dairy-free"
+          />
+          <Field
+            label="Caffeine (mg, optional)"
+            value={caffeine}
+            onChangeText={setCaffeine}
+            placeholder="e.g. 120"
+            keyboardType="decimal-pad"
+          />
+          <Text className="text-[11px] text-textMuted">
+            Empty sections are hidden from customers. Per-size nutrition is set on each size above.
+          </Text>
+        </View>
+
         {/* Preview */}
         <Text className="mb-2 mt-2 text-base font-bold text-textPrimary">Preview</Text>
         <View className="mb-6 flex-row overflow-hidden rounded-card border border-line bg-surface">
@@ -606,6 +818,27 @@ export default function AdminProductScreen() {
         ) : null}
       </ScrollView>
     </Screen>
+  );
+}
+
+function NutField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (t: string) => void;
+}) {
+  return (
+    <Field
+      label={label}
+      value={value}
+      onChangeText={onChange}
+      placeholder="—"
+      keyboardType="decimal-pad"
+      containerClassName="w-[31%]"
+    />
   );
 }
 

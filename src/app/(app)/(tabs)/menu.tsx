@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AnimatedPressable } from "@/components/ui/AnimatedPressable";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -45,6 +46,7 @@ const minPrice = (p: MenuProduct) =>
 
 export default function MenuScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const branch = useBranch((s) => s.branch);
   const lines = useCart((s) => s.lines);
   const favIds = useFavorites((s) => s.ids);
@@ -337,7 +339,10 @@ export default function MenuScreen() {
           keyExtractor={(p) => p.id}
           numColumns={2}
           columnWrapperClassName="gap-3 px-5"
-          contentContainerClassName="gap-3 pb-32 pt-1"
+          contentContainerClassName="gap-3 pt-1"
+          // Comfortable bottom room below the footer: clears the tab bar + the
+          // home-indicator safe area, plus extra when the floating cart bar shows.
+          contentContainerStyle={{ paddingBottom: insets.bottom + (count > 0 ? 184 : 136) }}
           showsVerticalScrollIndicator={false}
           initialNumToRender={8}
           maxToRenderPerBatch={8}
@@ -427,7 +432,7 @@ function MenuFooter({
 }) {
   if (filtered) {
     return (
-      <View className="items-center px-8 pb-4 pt-8">
+      <View className="items-center px-8 pb-4 pt-12">
         <Text className="text-center text-sm text-textSecondary">
           You&apos;ve reached the end of these results.
         </Text>
@@ -442,7 +447,7 @@ function MenuFooter({
     );
   }
   return (
-    <View className="items-center px-8 pb-6 pt-10">
+    <View className="items-center px-8 pb-8 pt-16">
       <View className="mb-4 h-px w-16 bg-line" />
       <View className="flex-row items-center gap-2">
         <Ionicons name="cafe" size={15} color={Colors.accent} />

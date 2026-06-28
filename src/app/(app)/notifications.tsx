@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { FlatList, Linking, Pressable, RefreshControl, Switch, Text, View } from "react-native";
+import { Alert, FlatList, Linking, Pressable, RefreshControl, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -44,6 +44,9 @@ export default function NotificationsScreen() {
   const refresh = useNotifications((s) => s.refresh);
   const markRead = useNotifications((s) => s.markRead);
   const markAll = useNotifications((s) => s.markAll);
+  const remove = useNotifications((s) => s.remove);
+  const clearRead = useNotifications((s) => s.clearRead);
+  const clearAll = useNotifications((s) => s.clearAll);
 
   const [refreshing, setRefreshing] = useState(false);
   const [showPrefs, setShowPrefs] = useState(false);
@@ -92,14 +95,37 @@ export default function NotificationsScreen() {
   }
 
   const hasUnread = items.some((n) => !n.read_at);
+  const hasRead = items.some((n) => !!n.read_at);
+
+  function confirmClearAll() {
+    Alert.alert(
+      "Clear all notifications?",
+      "This removes your entire notification history. It can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Clear all", style: "destructive", onPress: clearAll },
+      ],
+    );
+  }
+
+  function openManageMenu() {
+    const options: Parameters<typeof Alert.alert>[2] = [
+      { text: "Notification settings", onPress: () => setShowPrefs((s) => !s) },
+    ];
+    if (hasUnread) options.push({ text: "Mark all as read", onPress: markAll });
+    if (hasRead) options.push({ text: "Clear read notifications", onPress: clearRead });
+    if (items.length > 0) options.push({ text: "Clear all", style: "destructive", onPress: confirmClearAll });
+    options.push({ text: "Cancel", style: "cancel" });
+    Alert.alert("Notifications", undefined, options);
+  }
 
   return (
     <Screen edges={["top"]}>
       <Header
         title="Notifications"
         right={
-          <Pressable onPress={() => setShowPrefs((s) => !s)} hitSlop={8} accessibilityLabel="Preferences">
-            <Ionicons name="options-outline" size={22} color={Colors.brand} />
+          <Pressable onPress={openManageMenu} hitSlop={8} accessibilityLabel="Manage notifications">
+            <Ionicons name="ellipsis-horizontal" size={22} color={Colors.brand} />
           </Pressable>
         }
       />
@@ -202,6 +228,14 @@ export default function NotificationsScreen() {
                   {formatDateTime(item.created_at)}
                 </Text>
               </View>
+              <Pressable
+                onPress={() => remove(item.id)}
+                hitSlop={10}
+                accessibilityLabel={`Delete notification: ${item.title}`}
+                className="ml-2 -mr-1 self-start p-1"
+              >
+                <Ionicons name="trash-outline" size={16} color={Colors.textMuted} />
+              </Pressable>
             </Pressable>
           );
         }}
